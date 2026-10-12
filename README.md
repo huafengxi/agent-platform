@@ -23,4 +23,5 @@ python3 test_git_sync.py        # 单测：11 组，/tmp 沙箱，不写真实�
 ## 部署形态（本工作区）
 
 - 服务声明（`cmd`/`match`/`version` 住 profile，期望态住逐机 daemon 声明）住工作区的 `services/`，启停经 `make git-sync.start/.stop/.status`，执行层 = `serviced/serviced.py`；本仓不含任何服务定义。
+- **发现面自身的补丁不能自送**：某机的发现面已降级（启动行 `repos=['.']`）时，本仓的新代码不在它的同步面内 ⇒ 该机须人工 `git -C <ws>/git-sync pull --ff-only` 一次再 `make git-sync.stop && make git-sync.start`（profile `version` 未变 ⇒ 常驻纠偏不会替它重启）。
 - 镜像宿主机（本工作区 = `dev`；机器身份取自工作区 `env/host-id` 映射，只用于日志行，不参与判定）上，回推上游由每个 bare 镜像的 `post-receive` 钩子承担（钩子脚本住工作区 `bootstrap/git-mirror-post-receive.sh`，`make git-mirror.hooks` 安装；严格 ff-only，非 ff 只 WARN 不 force）；人工全量对账 = `make git-mirror.sync`。
