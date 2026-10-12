@@ -12,7 +12,10 @@ Covers:
      with a loud WARN and no merge.
 + ⑤ non-ff pull failure   -> `other` + WARN, worktree untouched.
 + ⑥ discover_repos: only top-level dirs that have .git AND are gitignored by
-     the main repo enter the sync face (a non-ignored clone does not).
+     the main repo enter the sync face (a non-ignored clone does not);
+     classification is per candidate, so a symlinked candidate (git refuses a
+     pathspec beyond a symlink) neither collapses the face to `['.']` nor goes
+     unclassified silently — an unclassifiable one costs exactly one WARN line.
 + ⑦ absent clone          -> `other`, silent.
 + ⑧ end-to-end CLI `--once --root ... --repos .`: exit 0, no mirror fetch in
      test mode.
@@ -259,6 +262,47 @@ check("gitignored clone discovered", "sub2" in repos, str(repos))
 check("non-ignored clone NOT discovered", "sub1" not in repos, str(repos))
 check("plain dir not discovered", "notarepo" not in repos, str(repos))
 check("no stray entries", set(repos) == {".", "sub2"}, str(repos))
+
+print("\n[⑥b] discover_repos: symlinked candidates classify per entry")
+# 一手形态：顶层有个指向工作区外的符号链接、链接目标里另有 .git（L20 的
+# ob_modelrouter）。批量 check-ignore --stdin 对它 rc=128 并把其余候选的判定一并提供不到
+# ⇒ 旧实现静默降成 repos=['.']（子仓全退出同步面）。
+ws, src = mk_sandbox(ignore=("sub2/", "linked/", "plain_link"))
+os.makedirs(os.path.join(ws, "sub2"), exist_ok=True)
+git(ws, "clone", "-q", os.path.join(os.path.dirname(ws), "origin.git"), "sub2-tmp")
+shutil.rmtree(os.path.join(ws, "sub2"))
+os.rename(os.path.join(ws, "sub2-tmp"), os.path.join(ws, "sub2"))
+os.symlink(src, os.path.join(ws, "linked"))       # 目录型 pattern（linked/）匹配不到符号链接
+os.symlink(src, os.path.join(ws, "plain_link"))   # 无斜杠 pattern 匹配得到
+repos = gs.discover_repos(ws)
+check("face survives a slashed-pathspec failure", set(repos) == {".", "sub2", "plain_link"},
+      str(repos))
+check("dir-only pattern does not match a symlink (git's own semantics)",
+      "linked" not in repos, str(repos))
+
+# 两问都失败 ⇒ 一行 WARN + 只排除它自己（降级可见、不静默）
+class _FakeSubprocess:
+    class _R:
+        returncode = 128
+        stdout = ""
+        stderr = "fatal: cannot classify"
+
+    @staticmethod
+    def run(*a, **k):
+        return _FakeSubprocess._R()
+
+
+_real_subprocess = gs.subprocess
+gs.subprocess = _FakeSubprocess
+try:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        repos = gs.discover_repos(ws)
+finally:
+    gs.subprocess = _real_subprocess
+check("unclassifiable candidate -> main repo only", repos == ["."], str(repos))
+warns = [ln for ln in buf.getvalue().splitlines() if "WARN" in ln]
+check("one WARN per unclassifiable candidate", len(warns) == 3, buf.getvalue())
 
 print("\n[⑦] absent clone -> other, silent")
 ws, src = mk_sandbox()

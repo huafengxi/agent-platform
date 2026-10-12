@@ -32,6 +32,14 @@ simply not in the face (Makefile `repo-list` is the *clone* list and may
 differ: it pulls from the mirror hub's ~/git mirrors, which do not host repos
 whose remote is a private host).
 
+Classification is PER CANDIDATE, and one odd entry can never collapse the face:
+git refuses a pathspec beyond a symlink (rc 128), so a candidate whose slashed
+form errors is re-asked unslashed (git sees a symlink as a file, hence only
+slash-free patterns can match it), and a candidate that cannot be classified at
+all is dropped with exactly one WARN line. A batch `check-ignore --stdin` cannot
+be used here: its rc 128 on any single pathspec would hide every other
+candidate's verdict (the silent `repos=['.']` degradation this replaces).
+
 Mirror host only (DISCOVERED, never named — this repo carries no machine list):
 on the machine whose mirror dir holds bare repos, every MIRROR_FETCH_EVERY rounds
 a background thread refreshes them from their own upstream — the FETCH half of the
@@ -114,24 +122,40 @@ def host_id(root):
     return hn
 
 
+def _ignored(root, name):
+    """`name` 是否被主仓 .gitignore 排除：True/False；无法分类 → None。
+
+    先问尾斜杠形态（目录型 pattern 如 `ido/`、`scratch/*` 只对带斜杠的路径生效）；
+    git 对「符号链接之后」的 pathspec 直接 fatal（rc=128：顶层某个指向工作区外的
+    链接里另有 .git 时即此形态）⇒ 退问不带斜杠的 name（git 眼里符号链接是文件，
+    只有无斜杠的 pattern 能匹配它）。两问都失败 = 无法分类。
+    """
+    for pathspec in (name + "/", name):
+        p = subprocess.run(["git", "check-ignore", "-q", pathspec], cwd=root,
+                           capture_output=True, text=True)
+        if p.returncode in (0, 1):  # 0=命中, 1=未命中
+            return p.returncode == 0
+    return None
+
+
 def discover_repos(root):
     """同步面 = 主仓 "." + 自动发现的顶层子仓（含 .git ∧ 被主仓 .gitignore 排除）。
-    发现失败（列目录/git 不可用）→ 只同步主仓。"""
+    发现失败（列目录/git 不可用）→ 只同步主仓。分类**逐枚**做：无法分类的候选只记一行
+    WARN 并排除它自己 —— 一枚坏候选 ⛔ 不得把整张面打回「只同步主仓」（那是静默降级：
+    子仓全部退出同步面，日志里只有启动行的 repos=['.'] 可看出端倪）。"""
     try:
         names = sorted(os.listdir(root))
     except OSError:
         return ["."]
     cands = [n for n in names if os.path.exists(os.path.join(root, n, ".git"))]
-    if not cands:
-        return ["."]
-    # 尾斜杠形态：目录型 pattern（如 `ido/`、`scratch/*`）只对带斜杠的路径生效
-    p = subprocess.run(["git", "check-ignore", "--stdin"], cwd=root,
-                       input="\n".join(n + "/" for n in cands),
-                       capture_output=True, text=True)
-    if p.returncode not in (0, 1):  # 0=有命中, 1=无命中
-        return ["."]
-    ignored = {line.strip().rstrip("/") for line in p.stdout.splitlines()}
-    return ["."] + [n for n in cands if n in ignored]
+    out = ["."]
+    for n in cands:
+        verdict = _ignored(root, n)
+        if verdict is None:
+            log(f"[{n}] WARN 候选无法分类（git check-ignore 两问都失败）⇒ 不入同步面")
+        elif verdict:
+            out.append(n)
+    return out
 
 
 def dirty_tracked_entries(path):
