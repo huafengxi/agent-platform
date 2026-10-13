@@ -161,8 +161,7 @@ def normalize_sched_fields(spec):
     }
 
 
-# 报告非空判定的首块取样字节数：区分「零字节/纯空白」与真交付足够（首块全空白而文件
-# 更长的病态形态由 report_nonempty 的整文件兜底覆盖）。
+# 分块扫描报告，遇到非空白即返回，长空白前缀无需重开或整文件读入。
 REPORT_HEAD_BYTES = 4096
 
 
@@ -177,15 +176,12 @@ def report_nonempty(path):
         if os.path.getsize(path) <= 0:
             return False
         with open(path, "rb") as f:
-            if f.read(REPORT_HEAD_BYTES).strip():
-                return True
+            for chunk in iter(lambda: f.read(REPORT_HEAD_BYTES), b""):
+                if chunk.strip():
+                    return True
     except OSError:
         return False
-    try:                      # 首块全空白但文件更长：整文件兜底，不因取样窗口误判
-        with open(path, "rb") as f:
-            return bool(f.read().strip())
-    except OSError:
-        return False
+    return False
 
 
 def _report_present(root, pid_):
