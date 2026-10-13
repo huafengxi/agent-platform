@@ -41,7 +41,6 @@ pi extension 只承载事件钩、会话消息注入与会话树读写；纯文�
 | `agentd4web.py` / `tasks.md` | 报表的 web 入口与视图 |
 | `envscrub.py` / `safe_delete.py` | 进程环境身份洗刷 / 临时测试根安全删除，契约见模块头 |
 | `e2e.py` / `test_*.py` / `fakeagent.py` | 回归与测试负载，覆盖面取各文件头 |
-| `RACE-NOTES.md` | 已知竞态与残余边界 |
 
 会话封装由兄弟 `pi-wrap/` 仓承担；任务树由调用方管理，不入本仓 git。
 
@@ -141,7 +140,7 @@ home 内 command/workdir 路径存 `~/…`，runner 按执行机 home 展开；�
 
 ## 已知风险（多机）
 
-离线机的运行任务保守占位；永久退役机器的排队件须重新登记并处置旧件。手工漏写 host 的目录无人认领。其它竞态与取舍见协议 §11 和 `RACE-NOTES.md`。
+离线机的运行任务保守占位；永久退役机器的排队件须重新登记并处置旧件。手工漏写 host 的目录无人认领。其它协议边界见协议 §11；会话收敛与临末注入风险见 `pi-wrap/README.md` 的 Exit-code contract。
 
 ## 判死纪律与杀纪律（协议 §5.5）
 
