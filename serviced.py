@@ -581,7 +581,7 @@ def _run_action(name, act):
     failing action must not abort the remaining ones — the Makefile's `%.stop`
     recipe carries a `-` prefix for exactly that reason."""
     try:
-        rc = (cmd_start_name if act == "start" else cmd_stop_name)([name])
+        rc = (cmd_start_name if act == "start" else cmd_stop_name)(name)
     except SystemExit as e:       # config / require_env errors exit with a msg
         return 1, str(e.code)
     except Exception as e:        # e.g. cmd not executable
@@ -1029,12 +1029,6 @@ def svc_entry(name):
     return svc
 
 
-def _lifecycle_name(argv):
-    if not argv:
-        sys.exit(__doc__)
-    return argv[0]
-
-
 def _expand(args):
     """argv with ~ expansion (shell-style home dirs, e.g. a config path under
     the service user's home): cmd is spawned without a shell, so expand here."""
@@ -1144,8 +1138,7 @@ def build_env(svc):
     return env
 
 
-def cmd_start_name(argv):
-    name = _lifecycle_name(argv)
+def cmd_start_name(name):
     svc = svc_entry(name)
     _validate_entry(svc)
     cmd = svc.get("cmd")
@@ -1212,8 +1205,7 @@ def cmd_start_name(argv):
     return 0
 
 
-def cmd_stop_name(argv):
-    name = _lifecycle_name(argv)
+def cmd_stop_name(name):
     svc = svc_entry(name)
     _validate_entry(svc)
     if svc.get("stop_cmd"):
@@ -1263,8 +1255,7 @@ def cmd_stop_name(argv):
     return 0
 
 
-def cmd_status_name(argv):
-    name = _lifecycle_name(argv)
+def cmd_status_name(name):
     svc = svc_entry(name)
     _validate_entry(svc)
     ok, detail = probe_online(svc)
@@ -1292,7 +1283,7 @@ def _dispatch():
                  "status": cmd_status_name}
     if len(argv) >= 2 and argv[0] in lifecycle:
         # `status NAME` is a lifecycle probe; bare `status` is the drift table
-        return lifecycle[argv[0]](argv[1:])
+        return lifecycle[argv[0]](argv[1])
     tables = {"status": cmd_status, "sync": cmd_sync, "trim": cmd_trim}
     if len(argv) == 1 and argv[0] in tables:
         return tables[argv[0]]()
