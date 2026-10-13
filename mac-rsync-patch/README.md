@@ -9,7 +9,7 @@
 macOS 内核凭据只缓存 `kern.ngroups=16` 个补充组（编译期只读常量），而本机用户
 在 Directory Services 有 18 个组——`getgroups(2)` 拿到的进程组表被截断，恰好
 丢掉 `replica(502)`。rsync 接收端非 root 时 `uidlist.c` 的 `is_in_group` 用
-`getgroups` 预检目标组，判否即 `FLAG_SKIP_GROUP` **静默跳过 chgrp**——于是
+`getgroups` 预检目标组，判否即 `FLAG_SKIP_GROUP` 静默跳过 chgrp——于是
 `--chown=:replica` / `-g` 全部失效（agents-sync 属组闸门的打标路径被打穿）。
 而 `chown(2)` 的内核鉴权走 OpenDirectory 全量组列表，所以 `chgrp`/`os.chown`
 一直可用。
@@ -20,11 +20,11 @@ macOS 内核凭据只缓存 `kern.ngroups=16` 个补充组（编译期只读常�
 `is_in_group` 一处）：
 
 - `#if defined(__APPLE__) && defined(HAVE_GETGROUPLIST)` 分支改用
-  `getgrouplist(3)` 取 Directory Services **全量**组成员（与内核 `chown(2)`
+  `getgrouplist(3)` 取 Directory Services 全量组成员（与内核 `chown(2)`
   鉴权同一数据源）；探测数组不足时倍增重试（macOS 的 getgrouplist 失败时
-  **不**回填所需数量，与 BSD 语义不同，上游 `getallgroups` 的扩容逻辑在
+  不回填所需数量，与 BSD 语义不同，上游 `getallgroups` 的扩容逻辑在
   macOS 上其实失效，本补丁未照抄）。
-- 非 Apple 构建（Linux 等）**逐字不变**：仍走 `getgroups`（Linux
+- 非 Apple 构建（Linux 等）逐字不变：仍走 `getgroups`（Linux
   `NGROUPS_MAX=65536`，无截断问题）。
 - 不改任何其它语义：非成员组仍照旧静默跳过（已实测）。
 
@@ -33,7 +33,7 @@ macOS 内核凭据只缓存 `kern.ngroups=16` 个补充组（编译期只读常�
 
 ## 补丁内容（二期）
 
-`rsync-chown-dirs-skip.patch`（正统 unified diff，p1，基于**一期补丁已应用**
+`rsync-chown-dirs-skip.patch`（正统 unified diff，p1，基于一期补丁已应用
 的树；两个 hunk，覆盖接收端组映射的两条路径）：
 
 - `flist.c` `recv_file_entry`（inc_recurse 默认路径）与 `uidlist.c`
@@ -41,10 +41,10 @@ macOS 内核凭据只缓存 `kern.ngroups=16` 个补充组（编译期只读常�
   `groupmap` 非空（即用户用了 --chown 组部分/--groupmap）且条目非正规文件，
   置 `FLAG_SKIP_GROUP`。
 - 效果复用上游既有抑制机制：`rsync.c` `set_file_attrs` 的 change_gid 与
-  `generator.c` 的组差异比较都检查该标志——目录/符号链接等**既不 chgrp、也
-  不会被生成器每轮报「组有变化」**（无周期拉锯噪音）。
+  `generator.c` 的组差异比较都检查该标志——目录/符号链接等既不 chgrp、也
+  不会被生成器每轮报「组有变化」（无周期拉锯噪音）。
 - 动机：一期修复让 --chown 真正生效后，macOS 目录组继承副作用暴露——目录被
-  标 replica 后，其内**新建**文件继承该组 → 被闸门误判为他机副本不回传。
+  标 replica 后，其内新建文件继承该组 → 被闸门误判为他机副本不回传。
   agents-sync 闸门语义中目录本就不承载状态位（白/黑名单只作用常规文件），故
   「--chown 不作用目录」不破坏任何语义。
 - 行为矩阵：--chown 常规文件照常打标；目录/符号链接/设备保持接收进程创建时
