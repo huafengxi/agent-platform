@@ -12,7 +12,7 @@
   bot register  登记进程型 bot spec：`--subscribes topic/<id>[,…]`（通道 B，§4.1）
                 + `--description`（→ spec `name`）/`--reaper`（→ spec `reaper`）
   topic init    创建 topic 标准布局（topic.md 骨架 + inbox/ + watcher/ 订阅登记，
-                设计稿 dispatch/docs/design/topic-design.md §7/§8）
+                现行协作规范 dispatch/docs/topics.md §7/§8）
   send          向参与方 inbox 写消息：ask|inform|reply 信封（§6）；`--deliver` 投递方式（§6.6）、
                 `--body-file -` 走 stdin（长正文不经 shell 断词）；type=ask 自动带 via 标记（§4.5）
   ack           收件方写传输层确认 inbox/ack/<id>（§3.1/§6.4）
@@ -417,7 +417,7 @@ def parse_subscribes(raw):
 
 
 def cmd_topic_init(a):
-    """建 topic 标准布局（agents/topic/<id>/，设计稿 topic-design.md §7/§8）：
+    """建 topic 标准布局（agents/topic/<id>/，现行协作规范 topics.md §7/§8）：
     topic.md 骨架（frontmatter `when:` 占位 + 议题/已决/未决三小节）、inbox/（全量日志）、
     watcher/（订阅注册表）；`--watcher <会话裸名>` 可重复 = 建通道 A 订阅条目（存在即订阅、
     删条目即退订，实现层 receiver 每轮实时重扫）。
@@ -474,7 +474,7 @@ when: "（占位：何时该来读本主题文档——一句话；入册后由 
 
 > topic = `{tid}`（协作容器：本文策展 + `inbox/` 全量日志 + `watcher/` 订阅注册表）。
 > **单写者** = owner/主持人；日志由机制自动过账（`agentctl send` 投递即落盘），绝不手工双写。
-> 机制权威：`dispatch/docs/design/topic-design.md`（§5.1 主持人载体、§7 双件套）；消息与收件口径：`dispatch/DISPATCH.md` §4/§8。
+> 机制权威：`dispatch/docs/topics.md`（§5.1 主持人载体、§7 双件套）；消息与收件口径：`dispatch/DISPATCH.md` §4/§8。
 > 删除/归档本主题一律走 `agents-sync/gc.py add topic/{tid}/` 通道（铁律：不得直接 rm）。
 
 ## 议题
@@ -784,11 +784,11 @@ def cmd_bot_register(a):
         声明源 `bots/daemon/<名字>/spec.json` + `make bots.seed`（fresh clone 自愈）。
 
     实现层 receiver 每轮实时重读 spec（通道 B 与通道 A 取并集），故订阅改动对在跑会话
-    动态生效；但 spec 只承载**登记期意图**（口径见 topic-design.md §5.1）。"""
+    动态生效；但 spec 只承载**登记期意图**（口径见 topics.md §5.1）。"""
     check_name_segment(a.name, "bot 名")
     # 同名跨布局撞名亦拒（协议 §2.2 创建方义务）；bot 目录本身在场 = 正常登记情形。
     # 撞名面只查 task/bot（同 create-bot）：**topic 同名不拒**——两者不同族目录无落盘冲突，
-    # 且主持人 bot 与其主题本就成对出现（topic-design.md §5.1 命名约定）；反向不对称：
+    # 且主持人 bot 与其主题本就成对出现（topics.md §5.1 命名约定）；反向不对称：
     # `topic init` 会拒 bot/task 同名（防止再造「职位信箱型 bot」这类杂交概念）。
     tdir_same = proto.task_dir(a.root, a.name)
     if os.path.exists(tdir_same):
@@ -1374,7 +1374,7 @@ def main():
                         % (", ".join(proto.FAMILIES), proto.NO_REAPER, proto.POSITION_PID))
     p.set_defaults(fn=cmd_bot_register)
 
-    # topic 组：协作容器脚手架（设计稿 dispatch/docs/design/topic-design.md §7/§8）
+    # topic 组：协作容器脚手架（现行协作规范 dispatch/docs/topics.md §7/§8）
     pt = sub.add_parser(
         "topic", help="topic 协作容器（子命令：init）——只创建；删除/归档铁律走 "
                       "agents-sync/gc.py add topic/<id>/ 通道，绝不直接 rm")

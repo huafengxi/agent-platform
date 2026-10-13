@@ -46,7 +46,7 @@
   S38 control/clear（弃历史换代）：running → 杀+备份+截断+空白新代（新进程可正常
       收件）+ 备份落位可解 + one-shot 立即换新代 + final 拒绝 +
       spawn 前 noop；reload 正交语义由 restart 既有场景（S3/S4）覆盖
-  S39 topic 协作容器（设计稿 dispatch/docs/design/topic-design.md）：寻址四族（文法/直落/
+  S39 topic 协作容器（现行协作规范 dispatch/docs/topics.md）：寻址四族（文法/直落/
       扫描面隔离）+ agentctl send 投递闭环（目录自动创建/信封字段/文件名格式）+
       GC 删除清单通道接受 topic/ 与 bot/（bot 不朽铁律 2026-09-06 经用户拍板移除；
       topic/dispatcher 受 PROTECTED_SYSTEM_PATHS 缺省拒删、--force 审计旁路可删）
@@ -2313,7 +2313,7 @@ def s38():
 # ---------------------------------------------------------------- S39
 
 def s39():
-    """topic 协作容器（设计稿 dispatch/docs/design/topic-design.md §8）：
+    """topic 协作容器（现行协作规范 dispatch/docs/topics.md §8）：
     寻址四族（文法/直落/扫描面隔离）+ agentctl send 投递闭环（目录自动创建、
     信封字段、文件名格式）+ GC 删除清单通道接受 topic/ 与 bot/（bot 不朽铁律
     2026-09-06 经用户拍板移除；topic/dispatcher 缺省拒删、--force 审计旁路可删）。"""
@@ -2431,7 +2431,7 @@ def s39():
 
 
 def s40():
-    """agentctl 脚手架（设计稿 topic-design.md §7/§8 + 协议 §4.1）：
+    """agentctl 脚手架（现行协作规范 topics.md §7/§8 + 协议 §4.1）：
     ① `topic init` 建标准布局（topic.md 骨架：frontmatter when: 占位 + 议题/已决/未决；
        inbox/；watcher/）+ `--watcher <裸名>` 通道 A 订阅登记（存在即订阅）；
     ② 拒绝面：已存在目录/非法段/保留名/跨布局撞名；

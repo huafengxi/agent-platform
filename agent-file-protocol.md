@@ -32,7 +32,7 @@ anchors:
 # Agent 文件通信协议（Agent File Communication Protocol）
 
 > **章节号冻结**：全仓以 `协议 §N.M` 引用本文（含代码注释），章节号是稳定锚点——只增不改：新内容追加为末尾新节或 `N.Mbis`；删节不留墓碑标题，其编号永久空缺、绝不重排（frontmatter `anchors` 声明的节标题不得删）。调用方侧的文档一致性 lint 校验全仓引用可解析（该工具属调用方部署面，本仓不钉其路径）。
-> **收录面**：本文只住协议本体的 require（文法、字段与写者归属、语义、判定谓词、边界处置）。不进本文：实测与事故实例、机制推导与设计理由、实现单点（函数/行号；例外 = 跨语言/跨仓对偶的同源单点：点名函数名而不抄其正文——两侧同判靠这个 pin 维持）、命令序列与报文原文、任务 id 与拍板日期。落点：实现面与实测 = `@agentd`、`pi-wrap/`、`w/ext/sessiond/`；应用层机制 = `@dispatch`/`@notify-and-delivery`/`@topic-design`；消费侧裁定与指标 = `lore/library/dispatch/facts/delivery-protocol.md`、`lore/library/agentfw/facts/{inbox-receiver,evidence-collection}.md`。
+> **收录面**：本文只住协议本体的 require（文法、字段与写者归属、语义、判定谓词、边界处置）。不进本文：实测与事故实例、机制推导与设计理由、实现单点（函数/行号；例外 = 跨语言/跨仓对偶的同源单点：点名函数名而不抄其正文——两侧同判靠这个 pin 维持）、命令序列与报文原文、任务 id 与拍板日期。落点：实现面与实测 = `@agentd`、`pi-wrap/`、`w/ext/sessiond/`；应用层机制 = `@dispatch`/`@notify-and-delivery`/`@topics`；消费侧裁定与指标 = `lore/library/dispatch/facts/delivery-protocol.md`、`lore/library/agentfw/facts/{inbox-receiver,evidence-collection}.md`。
 
 > **按名引用记号**：全文的 `` `@<名>#<锚点>` `` 是调用方工作区的按名引用记号 = 被引方在它自己 frontmatter 里自声明的稳定外名（⛔ 不是路径）；解析 = 那个工作区的 `bots/kb_index.py resolve <名>[#<锚点>]`（→ 路径 + 节标题）。本仓不含解析器（解析法住那个工作区）⇒ 在本仓单独阅读时按「另一册的节名」理解即可。
 
@@ -85,11 +85,11 @@ anchors:
 | 类别 | 例子 | 目录内容 |
 |---|---|---|
 | 进程型参与方 | 有 agent 进程在跑的任务/服务 | 完整目录（§3 全部条目） |
-| 非进程型参与方 | 人、创建者会话、协作容器 | 只有 `inbox/`（topic 族另有策展文档与订阅登记，`@topic-design`） |
+| 非进程型参与方 | 人、创建者会话、协作容器 | 只有 `inbox/`（topic 族另有策展文档与订阅登记，`@topics`） |
 
 协议层对二者不做区分，只差有没有进程在跑：人与 agent 都能被 ask、都能 reply、都能发 inform；人不需要 `spec.json`/`pid`/`runner`，其「运行」就是人自己去读目录、写文件（含代写 `reply`）。
 
-**布局 = 类型分层 + 四族（两层封顶，单布局）**：`task/<id>/`（自动名 `<rand6>`，自定义名如心跳任务同落此处；进程型）、`bot/<名字>/`（会话载体 ∨ 进程载体 = 分发地址：`inbox/` + `watcher/<participant名>` 订阅注册表 + 转发进程 `spec.json`/`pid.json`，语义 `@dispatch#channel`；信箱型 bot 无 `spec.json`）、`topic/<id>/`（`topic.md` + `inbox/` 全量日志 + `watcher/` + 可选 `minutes/`，创建入口 `agentctl topic init`；非进程型；含系统主题（无策展 owner、gc 受保护；现网唯一一枚 = 职位信箱的遗留载体 `topic/dispatcher`，现役载体在 `queue/dispatcher`，语义 `@topic-design`）、`queue/<名字>/`（无状态请求处理站 = 信箱 `inbox/`（+`ack/`）与处理进程档案 `spec.json`/`pid.json`/`enable.json` 同目录；⛔ 非 LLM 会话载体、⛔ 无 `watcher/` 订阅注册表（活性由其进程档案直供）、⛔ 不得被第三方会话绑定；创建入口 = 被追踪声明源 + `make bots.seed`，⛔ 无 ad-hoc 登记动词）。
+**布局 = 类型分层 + 四族（两层封顶，单布局）**：`task/<id>/`（自动名 `<rand6>`，自定义名如心跳任务同落此处；进程型）、`bot/<名字>/`（会话载体 ∨ 进程载体 = 分发地址：`inbox/` + `watcher/<participant名>` 订阅注册表 + 转发进程 `spec.json`/`pid.json`，语义 `@dispatch#channel`；信箱型 bot 无 `spec.json`）、`topic/<id>/`（`topic.md` + `inbox/` 全量日志 + `watcher/` + 可选 `minutes/`，创建入口 `agentctl topic init`；非进程型；含系统主题（无策展 owner、gc 受保护；现网唯一一枚 = 职位信箱的遗留载体 `topic/dispatcher`，现役载体在 `queue/dispatcher`，语义 `@topics`）、`queue/<名字>/`（无状态请求处理站 = 信箱 `inbox/`（+`ack/`）与处理进程档案 `spec.json`/`pid.json`/`enable.json` 同目录；⛔ 非 LLM 会话载体、⛔ 无 `watcher/` 订阅注册表（活性由其进程档案直供）、⛔ 不得被第三方会话绑定；创建入口 = 被追踪声明源 + `make bots.seed`，⛔ 无 ad-hoc 登记动词）。
 
 - **寻址 = 路径式 id 按第一段直落**（§2.2）：无存在性探测、无回退；类型容器目录本身不是参与方；层数固定两层、不支持任意嵌套——两层封顶使「哪一层是参与方」零歧义（类型容器下的一级子目录即参与方），层次需求用命名分层与关系字段表达（§2.2）；
 - **GC**：四族同等可经 gc 通道删除（删除传播实现单点 `agents-sync/gc.py`）；系统保护 = 该文件的 `PROTECTED_SYSTEM_PATHS`（现含职位信箱的两个载体地址 `topic/dispatcher` + `queue/dispatcher`，缺省拒删；审计旁路 `add --force --force-by <名>` 放行，清单条目带 ` #FORCED:` 标记）；形状护栏类（裸族级容器）连 `--force` 仍拒；
@@ -194,7 +194,7 @@ agents/<participantId>/
 | `reaper` | string | ➖ | 通知域扩展字段：终态通知的唯一收尾方（读报告验收、遗留进 todo、销账）。取值 = 两段路径式参与方 id ∨ 无收件方哨兵 `none`（= 到终态不发通知信封，⛔ 不是回落；合法性单点 = `proto.is_reaper_value`，用于无人收尾的一次性会话；其失败信号由登记方自己读退出码处置）。登记侧分两档：dispatch 登记路径恒写（缺省推导 = `creator`）、非法值拒绝登记；CLI（`agentctl create`/`bot register`）给了才写（不代填缺省值，未给时只在登记当场打一行 WARN）⇒ 缺字段在 CLI 路径是正常形态而非异常（note 是信息不是缺陷信号）；两档均非法值拒绝登记。运行侧解析不到目录 ∨ 无消费者 → 回落职位信箱并在信封 `body.note` 点名成因。终态通知与子端 ask 的写侧收件面同源消费本字段（哨兵档下 ask 仍回落职位信箱：ask 必须有收件面；`@dispatch#lifecycle`） |
 | `host` | string | ➖ | 路由扩展（§15）：目标机器——仅该机 runner 可认领；协议缺省语义 = `createdByHost`，登记实现一律登记时物化写入；缺失/空 = 无机器认领（§15.1） |
 | `createdByHost` | string | ➖ | 路由扩展（§15）：创建方所在机器，回信/审计用；缺省 = 创建者本机 |
-| `subscribes` | array of string | ➖ | 消息域扩展字段：登记期订阅意图——每项为 `topic/<id>`，该会话的 receiver 把对应 topic 全量日志信箱纳入监视面（共享式多订阅，ack 两态 §4.6）。只承载登记期意图：运行期增删订阅走 topic 的 `watcher/<裸名>` 条目，不改本不可变档。非 `topic/` 族与非法 id 一律忽略并留降级日志（`task/`、`bot/`、`queue/` 信箱不得被第三方会话绑定，防抢收）。写入口与硬校验 = `@agentd#usage`；主持人口径 = `@topic-design#moderator-carrier` |
+| `subscribes` | array of string | ➖ | 消息域扩展字段：登记期订阅意图——每项为 `topic/<id>`，该会话的 receiver 把对应 topic 全量日志信箱纳入监视面（共享式多订阅，ack 两态 §4.6）。只承载登记期意图：运行期增删订阅走 topic 的 `watcher/<裸名>` 条目，不改本不可变档。非 `topic/` 族与非法 id 一律忽略并留降级日志（`task/`、`bot/`、`queue/` 信箱不得被第三方会话绑定，防抢收）。写入口与硬校验 = `@agentd#usage`；主持人口径 = `@topics#moderator-carrier` |
 
 - **两个目录模型**：① `workdir` 属外部世界，协议不管理其中任何文件；② 应用层产物没有独立目录概念——agent 自家目录一身二任（协议文件容器 + 报告等产物的默认家园），协议对其中非协议文件一律无视（单写者：报告由 agent 自己写，§10.1）。
 - **协议与启动内容的边界**：提示词、权限、工具清单等启动内容文件（如 `prompt.md`）是应用层普通文件，与报告同等地位；`spec.json` 只保留进程管理必需的结构化字段（`command`/`workdir`/`restartPolicy`/`creator`），启动载荷组装归实现。➖ 的可选扩展字段（`host`/`createdByHost`/`subscribes`/`reaper`）不属这个最小集：它们是叠加层的结构化声明，缺失即零感知。
@@ -302,7 +302,7 @@ agents/<participantId>/
 
 **副本打标口径（跨机同步属组闸门）**：归属模型 = 信封按 `from`、命名空间 ack 按订阅者（`subscriber` 字段权威、命名空间目录段回退，段不做点号反解）、扁平 ack 按信箱所属会话的宿主，各取其 `spec.host`；解不出一律 UNKNOWN = 不打标（失效不对称，§15.4）。工具与匹配细则 = `agents-sync/replica-tag.py`。
 
-订阅声明字段 = `spec.subscribes`（§4.1）与 topic 侧 `watcher/<裸名>` 条目（实现层注册表，非本协议文件）；绑定判定与推送语义不属本协议层（= 实现层 receiver，`@dispatch#notify`、`@topic-design#two-pieces`/`#layout-addressing`③）。
+订阅声明字段 = `spec.subscribes`（§4.1）与 topic 侧 `watcher/<裸名>` 条目（实现层注册表，非本协议文件）；绑定判定与推送语义不属本协议层（= 实现层 receiver，`@dispatch#notify`、`@topics#two-pieces`/`#layout-addressing`）。
 
 注意：`ack/<id>` 只表示传输层送达，与「是否已答复」无关——会话层闭环由 `reply` 消息表达（§6.4）。
 
