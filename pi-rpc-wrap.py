@@ -348,14 +348,12 @@ class Wrap:
             # 不注入子端扩展（主端全套扩展由 workdir 的 .pi 自动发现）；工具面的排除只来自
             # profile 装载的能力声明（cap.yml 的 excludeTools/tools）——解析层无形态基线，
             # 本脚本也不预置任何工具面。
-            argv = [self.pi_bin, "--mode", "rpc", "--session", self.session_file,
-                    "-n", self.session_name or "[resident %s]" % self.name]
-            argv += self._probe_ext_argv()
-            argv += self._persona_ext_argv()
-            return argv
+            session_name = self.session_name or "[resident %s]" % self.name
+        else:
+            session_name = "[task %s]" % self.name
         argv = [self.pi_bin, "--mode", "rpc", "--session", self.session_file,
-                "-n", "[task %s]" % self.name]
-        for rel in CHILD_EXTS:
+                "-n", session_name]
+        for rel in (() if self.resident else CHILD_EXTS):
             p = os.path.join(self.root, rel)
             if os.path.exists(p):      # 文件缺失不拖垮会话（对齐 sessiond 口径）
                 argv += ["-e", p]

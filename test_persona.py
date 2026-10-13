@@ -501,20 +501,20 @@ def p9_cc():
         rr = t.resolve(profile="p-res")
         ok("P9g resident 档同等装配（策略住 profile、与形态无关）",
            rr["contextCompactionExt"] == ext, rr["contextCompactionExt"])
-        # 零 cap 是合法声明（interactive 档的定档形态），而 resolve() 对它走早退分支
-        # ⇒ 早退不得吞掉与能力面无关的运行环境字段（一手缺陷：command-center 声明了
+        # 零 cap 是合法声明（interactive 档的定档形态），解析不得吞掉与能力面无关的
+        # 运行环境字段（一手缺陷：command-center 声明了
         # 策略却被静默丢弃、零 WARN，压缩落回 pi 内建阈值）。
         t.profile("p-zero", caps=[], model="p/m", form=persona.FORM_INTERACTIVE,
                   extra={"contextCompaction": {"triggerTokens": 512000}})
         rz = t.resolve(profile="p-zero")
-        ok("P9h 零 cap 的早退分支同等装配策略（形态/能力面都不改变该字段的装配）",
+        ok("P9h 零 cap 同等装配策略（形态/能力面都不改变该字段的装配）",
            rz["caps"] == []
            and rz["contextCompaction"] == {"enabled": True, "triggerTokens": 512000}
            and rz["contextCompactionExt"] == ext,
            (rz["caps"], rz["contextCompaction"], rz["contextCompactionExt"]))
         t.profile("q-zero", caps=[], model="p/m", form=persona.FORM_INTERACTIVE)
         rz2 = t.resolve(profile="q-zero")
-        ok("P9i 零 cap 且未声明策略 ⇒ 两键仍同为空（早退分支不凭空装配）",
+        ok("P9i 零 cap 且未声明策略 ⇒ 两键仍同为空（零 cap 不凭空装配）",
            rz2["contextCompaction"] is None and rz2["contextCompactionExt"] is None,
            (rz2["contextCompaction"], rz2["contextCompactionExt"]))
     finally:
@@ -1018,14 +1018,14 @@ def p18_toc():
         t.profile("p-zero", caps=[], model="p/m", form=persona.FORM_INTERACTIVE,
                   extra={"toolOutputCap": {"maxChars": 3000, "keepHeadChars": 1000}})
         rz = t.resolve(profile="p-zero")
-        ok("P18g 零 cap 的早退分支同等装配策略（运行环境字段与能力面无关）",
+        ok("P18g 零 cap 同等装配策略（运行环境字段与能力面无关）",
            rz["caps"] == [] and rz["toolOutputCap"]["maxChars"] == 3000
            and rz["toolOutputCapExt"] == ext,
            (rz["caps"], rz["toolOutputCap"], rz["toolOutputCapExt"]))
         t.profile("q-zero", caps=[], model="p/m", form=persona.FORM_INTERACTIVE)
         t.profile("q-task", caps=["executor"], model="p/m")
         rz2, rt2 = t.resolve(profile="q-zero"), t.resolve(profile="q-task")
-        ok("P18h 未声明策略 ⇒ 两键同为空（零注入零行为变更；早退分支与常规分支同判）",
+        ok("P18h 未声明策略 ⇒ 两键同为空（零注入零行为变更；零 cap 与常规能力声明同判）",
            rz2["toolOutputCap"] is None and rz2["toolOutputCapExt"] is None
            and rt2["toolOutputCap"] is None and rt2["toolOutputCapExt"] is None
            and not any("toolOutputCap" in w for w in rt2["warnings"]),

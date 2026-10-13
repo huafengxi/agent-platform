@@ -322,18 +322,7 @@ class Resolver:
         out["caps"] = caps
         out["model"] = model
         out["provider"] = provider_of_model(model)
-        if not caps:
-            # 零 cap 是合法声明（interactive 档的定档形态）⇒ 早退只省掉能力面的展开，
-            # **不得吞掉与能力面无关的运行环境字段**（压缩策略住 profile、按声明装配）。
-            out["excludeTools"] = self._dedup(out["excludeTools"])
-            self.emit("profile %s 展开完成：能力=（零声明），model=%s，provider=%s，工具面=（缺省）",
-                      repr(pname) if pname else "（未设）", model or "（缺省）",
-                      out["provider"] or "（缺省）")
-            self._assemble_cc(out, cc)
-            self._assemble_toc(out, toc)
-            out["warnings"] = list(self.warnings)
-            return out
-
+        # 零 cap 同样走公共收口，运行环境策略的装配不依赖能力声明。
         kb_entries, t_list, xt_decl = [], [], []
         for name in caps:
             unit = self.cap_unit(name)
@@ -371,7 +360,8 @@ class Resolver:
             self.emit("knowledge 清单注入：%d 项声明，%d 字符", len(kb_entries), kb_chars)
 
         self.emit("profile %s 展开完成：能力=%s，model=%s，provider=%s，工具面=%s",
-                  repr(pname) if pname else "（未设）", ",".join(caps), model or "（缺省）",
+                  repr(pname) if pname else "（未设）", ",".join(caps) or "（零声明）",
+                  model or "（缺省）",
                   out["provider"] or "（缺省）",
                   ("白名单 %d 项" % len(out["tools"])) if out["tools"]
                   else (("黑名单 %d 项" % len(out["excludeTools"]))
@@ -384,7 +374,7 @@ class Resolver:
         return out
 
     def _assemble_cc(self, out, cc):
-        """压缩策略的装配（**单一实现**：零 cap 的早退分支与常规分支都调它，不写平行分支）。
+        """压缩策略的装配（能力展开后统一调用，零 cap 同等装配）。
 
         策略与路径同进同退；执行体缺失 = WARN + 不装配（fail-soft：会话照起，压缩落回 pi
         内建的 settings 阈值）。"""
@@ -402,8 +392,8 @@ class Resolver:
                   cc.get("enabled", True), ext)
 
     def _assemble_toc(self, out, toc):
-        """工具输出截断策略的装配（形态照 `_assemble_cc`：单一实现、零 cap 的早退分支与常规分支
-        都调它；策略与路径同进同退；执行体缺失 = WARN + 不装配，fail-soft：会话照起，工具输出
+        """工具输出截断策略的装配（形态照 `_assemble_cc`：零 cap 同等装配；
+        策略与路径同进同退；执行体缺失 = WARN + 不装配，fail-soft：会话照起，工具输出
         逐字不变）。与压缩策略不同的一面：本策略**对 task 形态也即时生效**（`tool_result` 在轮内
         逐枚触发，不依赖会话有空闲窗）。"""
         if not toc:
