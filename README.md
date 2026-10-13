@@ -204,8 +204,7 @@ status` 两层判定一致（排队/已放行待拉起、运行中（⚠️心�
 生效值 = 本体层缺省 `scheduler.DEFAULT_MAX_CONCURRENT`）。三层（本体 = 代码缺省值 ∕ 装配声明 =
 `scheduler-loop.sh` 的 `MAX_CONCURRENT` ∕ 运行态 = 实跑进程 argv）里只有运行态层是有效层——
 `scheduler.tick` 的饱和判据逐字 = `len(occupants) >= self.max_concurrent` 而 `self.max_concurrent` ← argv；
-装配声明层改了未重启即与生效值漂移。层次用词同 `lore/library/agentfw/facts/task-book-authoring.md`
-「实际落点层次」条的层次候选族。该行报量带层次名与取证依据（pid ∕ argv 键 ∕ 本体层缺省是否生效）。
+装配声明层改了未重启即与生效值漂移。核验区分本体、装配声明与实际运行值。该行报量带层次名与取证依据（pid ∕ argv 键 ∕ 本体层缺省是否生效）。
 上限不可得（本机无管这棵树的 scheduler ∕ 多枚值不一致 = 协议禁的双调度器形态 ∕ 探针失败）⇒ 该行标
 ⚠️ 不可得，且卡点列不断言「等槽位」（宁缺不错层：槽位层跳过、继续判主机层），「应跑未跑」门禁照常采集。
 活跃表排序：运行中（含心跳停滞）在前、已放行待拉起次之、排队中最后，组内按登记时间。
