@@ -299,13 +299,11 @@ def mirror_fetch(gitdir=MIRROR_DIR):
 
 
 _MIRROR_LOCK = threading.Lock()
-_mirror_thread = None
 
 
 def start_mirror_fetch(gitdir=MIRROR_DIR):
     """把一轮镜像 fetch 放到后台线程：GitHub 挂起绝不拖延拉取；上一轮未完则本轮
     跳过（不重叠、不排队）。返回线程对象（--once 时 join 用）。"""
-    global _mirror_thread
     if not _MIRROR_LOCK.acquire(blocking=False):
         log("[mirror] previous fetch round still running; skipping this round")
         return None
@@ -319,9 +317,9 @@ def start_mirror_fetch(gitdir=MIRROR_DIR):
         finally:
             _MIRROR_LOCK.release()
 
-    _mirror_thread = threading.Thread(target=run, name="mirror-fetch", daemon=True)
-    _mirror_thread.start()
-    return _mirror_thread
+    thread = threading.Thread(target=run, name="mirror-fetch", daemon=True)
+    thread.start()
+    return thread
 
 
 def acquire_lock(root):
