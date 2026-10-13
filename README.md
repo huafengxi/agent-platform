@@ -64,6 +64,13 @@ The failure modes it closes are all forms of false success and spawn races:
 Convergence grace: after closing stdin the wrapper waits `EXIT_GRACE` (15 s) for
 `pi` to exit, then SIGTERM.
 
+Convergence requires `agent_settled`, no in-flight turn and an empty queue,
+followed by an observation window that cancels convergence on new activity
+(`pi-rpc-wrap.py`, `settle_loop`). This reduces late-injection races but does not
+guarantee delivery: an injection whose acceptance or queue event is observed
+only after the window closes may be lost when stdin closes. Historical rationale
+is retained in agentd commit `50ec2f6`.
+
 ## Readiness handshake
 
 Two markers, both under `<root>/run/agentd/` (single source = `proto.task_ready_path`
