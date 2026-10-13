@@ -667,44 +667,23 @@ def reap(ws, agents_dir, now=None, verbose=True):
         # entry carries its audit marker AFTER the trailing slash, so
         # entry.endswith("/") would misroute it into the file branch.
         try:
-            if split_force(entry)[0].endswith("/"):
-                if os.path.islink(p):
-                    # Symlink: consume the link itself (the target
-                    # survives); the entry converges (review S2).
-                    os.remove(p)
-                    deleted.append(entry)
-                elif os.path.isdir(p):
-                    shutil.rmtree(p)
-                    deleted.append(entry)
-                elif os.path.lexists(p):
-                    # Type mismatch (dir entry at a plain file): remove
-                    # it so the entry converges instead of retrying
-                    # forever (bug2/S2 policy).
-                    print(f"reap: warning: {entry!r}: directory entry "
-                          "at a plain file; removing the file",
-                          file=sys.stderr)
-                    os.remove(p)
-                    deleted.append(entry)
-                else:
-                    deleted.append(entry)  # already gone = converged
-            else:
-                if os.path.islink(p):
-                    os.remove(p)
-                    deleted.append(entry)
-                elif os.path.isdir(p):
-                    # Type mismatch (file entry at a directory, e.g. an
-                    # unslashed dir path from a pre-bug2-fix list):
-                    # remove the subtree so the chain converges.
+            is_dir_entry = split_force(entry)[0].endswith("/")
+            if os.path.islink(p):
+                # Consume the link itself, never its target (review S2).
+                os.remove(p)
+            elif os.path.isdir(p):
+                if not is_dir_entry:
                     print(f"reap: warning: {entry!r}: file entry at a "
                           "directory; removing the subtree",
                           file=sys.stderr)
-                    shutil.rmtree(p)
-                    deleted.append(entry)
-                elif os.path.lexists(p):
-                    os.remove(p)
-                    deleted.append(entry)
-                else:
-                    deleted.append(entry)  # already gone = converged
+                shutil.rmtree(p)
+            elif os.path.lexists(p):
+                if is_dir_entry:
+                    print(f"reap: warning: {entry!r}: directory entry "
+                          "at a plain file; removing the file",
+                          file=sys.stderr)
+                os.remove(p)
+            deleted.append(entry)  # absent paths also converge
             sched.pop(entry, None)
         except OSError as e:
             missed.append((entry, str(e)))
