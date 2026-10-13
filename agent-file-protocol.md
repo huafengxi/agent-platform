@@ -553,7 +553,7 @@ runner 作为系统发送方（`from` = 保留裸名 `agentd`，§2.2）写的 i
 - **报告默认落自家目录**：`agents/<participantId>/` 一身二任（协议文件容器 + 应用层产物默认家园）；报告是应用层文件——协议不定义、不消费，对目录内非协议文件一律无视（单写者：报告由 agent 自己写）；
 - **报告形式自由**（逐条核验式或自由叙述式均可）：属应用层，协议不过问内容与格式；
 - **推荐而非强制**：缺席汇报不影响任何判定谓词（§10 只看进程级终局）；是否汇报、汇报质量由应用层自行约束与评价；
-- **最终输出口径**（应用层）：最终输出 = session.jsonl 终末轮次（完成证据 = jsonl 过程 + report.md 结论）；进程级失败由封装脚本落 `diagnosis.md`；事故排查路径 = session.jsonl（可经 8080 聊天窗直开）+ `pid.json` exitcode + `diagnosis.md`（口径 `@task-layout`；triage = skill `task-incident-triage`）。
+- **最终输出口径**（应用层）：最终输出 = session.jsonl 终末轮次（完成证据 = jsonl 过程 + report.md 结论）；进程级失败由封装脚本落 `diagnosis.md`；事故排查路径 = session.jsonl（可经 8080 聊天窗直开）+ `pid.json` exitcode + `diagnosis.md`（口径 `@dispatch#task-dir`；triage = skill `task-incident-triage`）。
 
 ---
 
@@ -655,7 +655,7 @@ drift 的修复动作复用控制三动作：期望 online 读到代终态 → `
 
 1. **`session/` 不受不可变纪律约束**：不可变纪律只约束协议判定文件；`session/` 归类为「协议不透明」（§8 行 3）——协议不定义其格式与内部写纪律，只保证归属唯一（高频改写合法，§3.4）。
 2. **`final` 已为 `true` 时重复 stop = `ack(noop)` 且不再写入**：runner 行为性停写、不再碰 `pid.json`（detail = `already final`），与 §5.4 规则 2/3 对称。
-3. **「每个 ask 至多一个 reply」的判重数据源 = 提问方 inbox 观察**：认定未答 ask 的条件即「目标任务 `inbox/` 中不存在 `ref==ask.id` 的 reply」，答复方写 reply 前后均以此为据（链路与实现单点 = `@ask-protocol`）。
+3. **「每个 ask 至多一个 reply」的判重数据源 = 提问方 inbox 观察**：认定未答 ask 的条件即「目标任务 `inbox/` 中不存在 `ref==ask.id` 的 reply」，答复方写 reply 前后均以此为据（链路与实现单点 = `@ask-playbook#protocol`）。
 4. **非进程型收件方的 `ack` 由 receiver 扩展落笔**：同名会话的 receiver 按会话名认领自家信箱，共享式多订阅信箱（`topic/`）按绑定认领 `ack/<订阅者>/<id>`（§4.6 两态）；认领与落笔分离——「注入调用已返回」不构成送达证据（§4.6）。裸人绕过 receiver 直读文件属约定而非协议强制（开放边界）。
 5. **时间戳格式属实现约定，跨机只「尽力有序」**：协议不固定 `ts`/`startedAt` 格式（§6.5）；实现层两种格式并存（Python 侧本机时区、TS 扩展侧 `+08:00` ISO），跨机可比性依赖各机时钟同步，精确因果序只能靠 `ref` 链。取数前置 = 读时刻字段先核格式（单一解析器会静默假阴性），口径与现值 = `lore/library/agentfw/facts/evidence-collection.md`。
 
