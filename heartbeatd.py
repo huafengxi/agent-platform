@@ -480,22 +480,13 @@ def next_fire(sched, now, last_fire=None, run_started=None):
             cand += timedelta(days=1)
         return cand.timestamp()
 
-    if form == "weekly":
-        want = {WEEKDAYS[d.lower()] for d in body["days"]}
-        for off in range(SEARCH_DAYS + 1):
-            day = (now_dt + timedelta(days=off)).date()
-            if day.weekday() not in want:
-                continue
-            cand = _at_on(day, hms)
-            if cand.timestamp() > now:
-                return cand.timestamp()
-        return None
-
-    # monthly: day-of-month candidates; a month without that day is skipped
-    want = set(body["days"])
+    # Weekly and monthly share the date search; absent month dates are skipped.
+    weekly = form == "weekly"
+    want = ({WEEKDAYS[d.lower()] for d in body["days"]}
+            if weekly else set(body["days"]))
     for off in range(SEARCH_DAYS + 1):
         day = (now_dt + timedelta(days=off)).date()
-        if day.day not in want:
+        if (day.weekday() if weekly else day.day) not in want:
             continue
         cand = _at_on(day, hms)
         if cand.timestamp() > now:
