@@ -31,6 +31,7 @@ runner 不再实例化/调用调度器；调度方由 scheduler-loop.sh 独立�
 """
 import argparse
 import datetime
+import fcntl
 import hashlib
 import json
 import logging
@@ -47,21 +48,9 @@ import proto  # noqa: E402
 
 log = logging.getLogger("agentd.runner")
 
-# ---------- 单实例锁 = 每机一份的探活锁文件 ----------
-# 布局：<root>/agents/run/agentd.<host>.lock（host = 规范名，env/host-id 映射；本机 = nv1；
-# 路径单点 = proto.agentd_lock_path）。
-# agents/ 整树跨机同步（DESIGN-multimachine §2.2）：每机只写自己那份 → 跨机不误撞，
-# 且别机可在目录里直接看到各机 agentd 存活情况。历史沿革：原在 agents/.agentd.lock
-# （误撞顾虑 迁 <root>/run/agentd.lock），
-# 2026-08-27 用户拍板迁 agents/ 顶层，
-# 2026-08-31 迁入 agents/run/（全停切换）。
-# 内容：JSON 一行 {host, pid, procStart, startedAt, updatedAt}。
-# 探活语义（用户简化口径：心跳式定期刷新即探活）：主循环每 5s 重写刷 updatedAt；
-# 别机判存活基于 updatedAt 新鲜度而非存在性——同步契约无 --delete（不传播删除），
-# 崩溃留死锁、优雅退出也不删文件（删除无意义），停更即自然判死。
-# 本机互斥仍是第二道防线（防手工双开/竞态绕过 Makefile pgrep 判重）：
-# O_EXCL 创建；已存在 → 按 (pid,procStart) 校验持锁者（杀纪律口径）：
-# 活 → 记日志退出（0）；死/解析失败/缺字段 → 视为死锁，删除重建（接管）。
+# 本机 flock 与同步探活分开：run/locks/ 的稳定 inode 负责互斥；
+# proto.agentd_lock_path 指向 agents/run/ 下的 JSON，每机只发布自己一份。
+# updatedAt 每 5s 原子刷新，远端只读其新鲜度；退出停更，不传播删除。
 LOCK_REFRESH_INTERVAL = 5.0  # 探活刷新周期（终态该文件跨机同步，勿刷太密，§2.3 备注）
 
 def ts_epoch(ts):
@@ -83,12 +72,7 @@ def lock_path(root, host):
 
 
 def spec_is_resident(spec):
-    """常驻参与方判定（口径单点 = `scheduler.is_resident`：spec.command 内嵌
-    `AGENTD_RESIDENT=1` 前缀）。
-
-    **函数内延迟 import**：只在调用点取（首次之后是 sys.modules 查表），使调度半边不因为
-    本模块而进本文件的模块级依赖面。
-    ⛔ 不在本文件复制第二份字面判据（spawn 里那处内联字面属存量，不扩大）。"""
+    """Use the scheduler's resident predicate for spawn and finalization."""
     import scheduler
     return scheduler.is_resident(spec)
 
@@ -105,46 +89,24 @@ def refresh_lock(lockfile, host, started_at):
 
 
 def acquire_single_instance_lock(root, host):
-    """O_EXCL 占坑；返回锁文件路径。活锁拒启（日志 + exit 0，对齐旧守护），
-    死锁接管（删后重试 1 次），两轮仍失败则 exit 1。"""
+    """Return a held local lock and the synced heartbeat path.
+
+    The caller keeps the handle open for the runner's entire lifetime. Atomic
+    heartbeat replacement cannot release this separate, stable-inode lock.
+    """
+    guard = os.path.join(root, "run", "locks", "agentd.%s.lock" % host)
+    os.makedirs(os.path.dirname(guard), exist_ok=True)
+    handle = open(guard, "a+")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        log.error("另一个 agentd runner 已在运行，本进程退出")
+        sys.exit(0)
     lockfile = lock_path(root, host)
-    os.makedirs(os.path.dirname(lockfile), exist_ok=True)
-    for _attempt in range(2):
-        try:
-            fd = os.open(lockfile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(json.dumps(_lock_doc(host, proto.now_ts()),
-                                   ensure_ascii=False) + "\n")
-            log.info("single-instance lock acquired: %s (pid %d)",
-                     lockfile, os.getpid())
-            return lockfile
-        except FileExistsError:
-            holder_pid = None
-            holder_start = None
-            try:
-                with open(lockfile, encoding="utf-8") as f:
-                    doc = json.loads(f.read())
-                holder_pid = doc.get("pid")
-                holder_start = doc.get("procStart")
-            except (OSError, ValueError):
-                pass  # 读不到/解析失败按死锁处理（接管）
-            # 无 pid → 无法定位持锁者，按死锁处理（接管）。
-            # 有 pid → 身份校验（杀纪律口径）：(pid,procStart) 二元组堵 pid 复用；
-            # procStart 缺失/为 null（非 Linux 正常形态，本机锁恒如此；或遗留档案）
-            # 由 pid_identity_ok 回退裸 kill(pid,0) 探测（
-            # 同源修复：修复前 None 身份被当死锁 → 双开防线失效）。
-            if holder_pid and proto.pid_identity_ok(holder_pid, holder_start):
-                log.error("另一个 agentd runner 已在运行（持锁 pid=%d），本进程退出",
-                          holder_pid)
-                sys.exit(0)
-            try:
-                os.unlink(lockfile)
-                log.warning("检测到已死持锁进程留下的锁（pid=%s procStart=%s），已接管",
-                            holder_pid, holder_start)
-            except OSError:
-                pass  # 并发删除，重试
-    log.error("无法获取单实例锁 %s，退出", lockfile)
-    sys.exit(1)
+    refresh_lock(lockfile, host, proto.now_ts())
+    log.info("single-instance lock acquired: %s (pid %d)", guard, os.getpid())
+    return handle, lockfile
 
 
 # ---------- 通知通道（终态通知 = reaper 单收件方模型） ----------
@@ -220,9 +182,6 @@ class Runner:
                 self.lock_started_at = doc["startedAt"]  # 沿用首启时刻，刷新不重置
         # participantId（路径式，如 task/<id>） -> Popen 句柄（只认自己 spawn 的孩子；§11.8 pid 仅 runner 本机自写自读）
         self.popen = {}
-        # pid 复用加固（§5.5 杀纪律 / §11.8 防线）：
-        # participantId -> 内核启动时刻（内存副本，落盘在 pid.json.procStart）
-        self.procstart = {}
         # 缺 host 告警去重（0.5s 轮询防刷屏；内存集，重启重打一次无害）
         self._nohost_warned = set()
         # 终态通知重放护栏（判据见 REPLAY_GRACE_DEFAULT 注释）：本次进程启动纪元 +
@@ -691,7 +650,7 @@ class Runner:
         # 常驻会话不注入（用户拍板调整）：常驻本质 = 调度员身份，
         # 扩展侧三处 AGENTD_TASK 连锁（工厂惰性化/防递归/时长 guard）天然不触发，
         # 扩展代码零改动；识别口径 = spec.command 内嵌 `AGENTD_RESIDENT=1` 前缀。
-        if "AGENTD_RESIDENT=1" not in spec.get("command", ""):
+        if not spec_is_resident(spec):
             env["AGENTD_TASK"] = "1"
             # 子端 ask 写侧收件面（项 1）：复用 resolve_reaper 单点经 env 交子端取值
             # （ask 收件面 = 该与终态通知同源；reaper 不可达 → 回落职位信箱带 note）。
@@ -709,7 +668,6 @@ class Runner:
                              env=env, start_new_session=True)
         self.popen[pid_] = p
         start = proto.proc_starttime(p.pid)   # 自开机时钟节拍，不受系统时钟调整影响（§4.2）
-        self.procstart[pid_] = start
         doc = {"gen": gen, "pid": p.pid, "status": "running",
                "startedAt": proto.now_ts(), "lastAliveAt": proto.now_ts(),
                "restarts": gen - 1, "final": False}
@@ -906,6 +864,29 @@ class Runner:
 
     # ---------- 单个参与方一轮 ----------
 
+    def observe(self, pid_, doc):
+        """Update a running generation from its child handle or orphan identity.
+
+        A Popen handle owns exit-status collection. Orphans only get an identity
+        probe: if absent their true exit status is unavailable (stale/127).
+        """
+        handle = self.popen.get(pid_)
+        if handle is None:
+            alive = self.probe_alive(pid_, doc.get("pid"), doc.get("procStart"))
+            status, code = "stale", proto.EXITCODE_STALE
+        else:
+            rc = handle.poll()
+            alive = rc is None
+            status = "killed" if rc is not None and rc < 0 else "exited"
+            code = 128 - rc if rc is not None and rc < 0 else rc
+        if alive:
+            doc["lastAliveAt"] = proto.now_ts()
+        else:
+            doc.update(status=status, exitcode=code, endedAt=proto.now_ts())
+            self.popen.pop(pid_, None)
+            log.info("%s gen %d %s exitcode %s", pid_, doc["gen"], status, code)
+        self.write_pid(pid_, doc)
+
     def service(self, pid_):
         spec = self.read_spec(pid_)
         if spec is None:
@@ -952,47 +933,8 @@ class Runner:
             self.spawn(pid_, spec, 1)
             return
 
-        # ---- 有 pid.json 且未 final ----
         if doc.get("status") == "running":
-            pid = doc.get("pid")
-            h = self.popen.get(pid_)
-            if h is not None:
-                rc = h.poll()  # 防线 1：自己 spawn 的孩子，句柄 poll 收尾，拿得到真死因
-                if rc is None:
-                    doc["lastAliveAt"] = proto.now_ts()  # 心跳：每轮刷新（§3.3-2）
-                    self.write_pid(pid_, doc)
-                elif rc < 0:
-                    doc.update(status="killed", exitcode=128 + (-rc),
-                               endedAt=proto.now_ts())
-                    self.write_pid(pid_, doc)
-                    self.popen.pop(pid_, None)
-                else:
-                    doc.update(status="exited", exitcode=rc,
-                               endedAt=proto.now_ts())
-                    self.write_pid(pid_, doc)
-                    self.popen.pop(pid_, None)
-            else:
-                # 句柄不在手（如 runner 重启后接手档案）：外部存活探测（§7.1-3）。
-                # 判死纪律（0.b）：禁裸 waitpid——只走 (pid,procStart) 二元组校验（防线 2）。
-                # 杀纪律（§5.5）：不匹配视同进程不存在（进入终态判定路径），
-                # 堵住 pid 复用误判活着（§11.8）。
-                if self.probe_alive(pid_, pid, doc.get("procStart")):
-                    doc["lastAliveAt"] = proto.now_ts()
-                    self.write_pid(pid_, doc)
-                else:
-                    # 进程已消失（或 pid 被复用）而死因不可得：按约定判挂死（§4.2 赋值）
-                    doc.update(status="stale", exitcode=proto.EXITCODE_STALE,
-                               endedAt=proto.now_ts())
-                    self.write_pid(pid_, doc)
-                    log.info("%s stale (process gone / pid identity mismatch)%s",
-                             pid_,
-                             "; report.md present → notify task_done per §5"
-                             if os.path.exists(os.path.join(self.adir(pid_),
-                                                            "report.md"))
-                             else "")
-            if doc.get("status") != "running":
-                log.info("%s gen %d %s exitcode %s", pid_, doc["gen"],
-                         doc["status"], doc.get("exitcode"))
+            self.observe(pid_, doc)
 
         # finalize（生命周期吸收态，§4.1）：**非常驻参与方到代终态即 final，与 restartPolicy
         # 无关**——该字段只管自愈（判据逐字 == "auto"，下面那块），不管收口。缺键（`agentctl
@@ -1070,10 +1012,10 @@ def main():
                          "0 = 启动前已终态者一律不发（判据见 REPLAY_GRACE_DEFAULT）")
     a = ap.parse_args()
     setup_logging(a.log_file, a.log_level)
-    # 单实例锁：构造 Runner 前获取（活锁拒启/死锁接管）。优雅退出不删文件：
+    # 构造 Runner 前持有本机 flock；同步心跳在退出时保留：
     # 同步契约不传播删除，停更 updatedAt 即别机判死依据（探活锁语义）。
     host_id = a.host or socket.gethostname()
-    lockfile = acquire_single_instance_lock(os.path.abspath(a.root), host_id)
+    lock_handle, lockfile = acquire_single_instance_lock(os.path.abspath(a.root), host_id)
 
     def _on_term(signum, _frame):
         raise SystemExit(128 + signum)
@@ -1086,6 +1028,8 @@ def main():
         r.run()
     except (KeyboardInterrupt, SystemExit):
         log.info("bye (lock file %s kept: 停更即判死依据)", lockfile)
+    finally:
+        lock_handle.close()
 
 
 if __name__ == "__main__":

@@ -136,7 +136,7 @@ running 与已放行未落 pid 均占位；远端终态同步延迟只延后放�
 
 home 内 command/workdir 路径存 `~/…`，runner 按执行机 home 展开；非 home 绝对路径保持。路径可移植不改变写者归属。
 
-无删除传播的传输中，单机删除会被其它副本复活；清理须由同步层协调所有节点。runner 探活锁以 updatedAt 新鲜度判活，不以存在性判活；本机互斥校验 pid 与 procStart。
+无删除传播的传输中，单机删除会被其它副本复活；清理须由同步层协调所有节点。runner 探活锁以 updatedAt 新鲜度判活，不以存在性判活；本机互斥用 `run/locks/agentd.<host>.lock` 的 flock，退出由内核释放；同步心跳 JSON 不参与互斥。
 
 ## 已知风险（多机）
 
@@ -160,7 +160,7 @@ home 内 command/workdir 路径存 `~/…`，runner 按执行机 home 展开；�
 
 ## 验证
 
-CLI 参数与覆盖场景取 `e2e.py` 文件头；runner 生命周期、通知与报表分别有 `test_runner_final.py`、`test_runner_notify.py`、`test_report_slots.py`。用临时根运行，禁止测试负载落生产树；并发改代码时用完整快照隔离。
+CLI 参数与覆盖场景取 `e2e.py` 文件头；runner 生命周期、通知与报表分别有 `test_runner_final.py`、`test_runner_notify.py`、`test_report_slots.py`；本机互斥回归见 `test_runner_lock.py`。用临时根运行，禁止测试负载落生产树；并发改代码时用完整快照隔离。
 
 外部测试有界运行并保留真实退出码。调用方扩展测试及 opt-in 真 pi 注入探针住扩展 tests/；收件闸门的三态判据与探针入口 = `@notify-and-delivery`。封装与人格装配测试住 pi-wrap，资产与名字引用校验住调用方 bots，不在本仓复制步骤。
 

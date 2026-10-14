@@ -1112,11 +1112,11 @@ def s15():
 # ---------------------------------------------------------------- S16（新增，T1-6）
 
 def s16():
-    """单实例锁 = 每机一份的探活锁文件。
+    """本机 flock 互斥 + 每机一份的同步探活 JSON。
     布局 <root>/agents/run/agentd.<host>.lock（树内、跨机同步可见，每机只写自己那份）；
     JSON 一行 {host, pid, procStart, startedAt, updatedAt}；主循环定期刷 updatedAt。
     ① 双开：活锁在持时第二实例秒退（rc=0），锁不被抢、原实例无恙；
-    ② 死锁接管：SIGKILL 后死锁残留，新实例按 (pid,procStart) 校验接管重建；
+    ② SIGKILL 后内核释放 flock，新实例发布自己的探活 JSON；
     ③ 优雅退出（SIGTERM）→ 不删文件（同步契约不传播删除），只停更，
        再启走接管路径重建；④ updatedAt 周期刷新（探活心跳）。"""
     lockfile = os.path.join(ROOT, "agents", "run", "agentd.e2ehost.lock")
