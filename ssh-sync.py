@@ -66,9 +66,10 @@ Rules, point by point:
 6. Failure is ASYMMETRIC: an unmarked file is never overwritten (worst
    case = a stale replica lingers, never data loss), and every protected
    or refused path is logged ("why didn't it sync? → it is unmarked here").
-7. Glob defense: protect-list and gc-list entries containing ``*?[`` or a
-   newline are REFUSED with a warning — rsync patterns are globs, and a
-   corrupted protection is worse than a missed sync.
+7. Protect-list paths containing ``*?[`` or a newline abort the pull:
+   omitting an original would expose it to overwrite. Unreadable ownership
+   also aborts the cycle; only a file that vanished during the walk is skipped.
+   Malformed gc-list entries are refused individually and logged.
 8. GC delete-list: deletions do not propagate through a no---delete mesh,
    so the hub-side GC tool (``agents-sync/gc.py``, run on the hub only) publishes
    cumulative lists at ``gc/delete-list.<seq>``. The PULL side unions every
@@ -500,28 +501,14 @@ def apply_gc_deletions(local_dir):
         try:
             if not os.path.lexists(p):
                 continue
-            if is_dir:
-                if os.path.islink(p):
-                    os.remove(p)  # consume the link; target survives
-                    deleted += 1
-                elif os.path.isdir(p):
-                    shutil.rmtree(p)
-                    deleted += 1
-                else:
-                    wlog(f"warning: gc: {rel}: directory entry at a "
-                         f"plain file; removing the file")
-                    os.remove(p)
-                    deleted += 1
+            actual_dir = os.path.isdir(p) and not os.path.islink(p)
+            if actual_dir != is_dir:
+                wlog(f"warning: gc: {rel}: entry type differs; removing local copy")
+            if actual_dir:
+                shutil.rmtree(p)
             else:
-                if os.path.islink(p):
-                    os.remove(p)
-                elif os.path.isdir(p):
-                    wlog(f"warning: gc: {rel}: file entry at a "
-                         f"directory; removing the subtree")
-                    shutil.rmtree(p)
-                else:
-                    os.remove(p)
-                deleted += 1
+                os.remove(p)  # A symlink is removed without following its target.
+            deleted += 1
         except OSError as e:
             wlog(f"warning: gc: failed to delete {rel}: {e}")
     if deleted:
@@ -667,22 +654,6 @@ def probe_replica_membership(local_dir, replica_gid):
             f"in a fresh login session).")
 
 
-def probe_remote_replica_group(cfg, host):
-    """The receiver of push resolves --chown=:replica by NAME locally;
-    the group must exist there too. getent covers Linux; dscl covers
-    macOS (no getent there)."""
-    cmd = ["ssh", "-F", cfg] + SSH_TIMEOUT_OPTS \
-        + [host, f"getent group {REPLICA_GROUP} 2>/dev/null || "
-                 f"dscl . -read /Groups/{REPLICA_GROUP} PrimaryGroupID "
-                 f"2>/dev/null"]
-    r = run(cmd, verbose=False, check=False, capture=True)
-    if r.returncode != 0:
-        die(f"group {REPLICA_GROUP!r} not found on remote {host!r} "
-            f"(push's --chown=:replica resolves the name on the "
-            f"receiver). Fix on {host}: sudo groupadd {REPLICA_GROUP} "
-            f"&& sudo usermod -aG {REPLICA_GROUP} <user>")
-
-
 def unmarked_files(local_dir, replica_gid, excludes=()):
     """(relpaths, ok): regular files of local_dir whose group is NOT
     replica — the local ORIGINALS. ok=False if the walk hit an error;
@@ -706,8 +677,11 @@ def unmarked_files(local_dir, replica_gid, excludes=()):
                 continue
             try:
                 st = os.lstat(p)
-            except OSError:
+            except FileNotFoundError:
                 continue  # raced with deletion: harmless either way
+            except OSError as e:
+                errors.append(e)  # Unknown ownership cannot be omitted safely.
+                continue
             if not statmod.S_ISREG(st.st_mode):
                 continue
             if st.st_gid != replica_gid:
@@ -944,9 +918,10 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
                 # anywhere in the tree).
                 protect.append("/" + rel)
         if refused:
-            wlog(f"warning: glob defense: refused {len(refused)} path(s) "
-                 f"with wildcard chars from the pull protect list (they "
-                 f"would not sync until renamed): {refused[:5]}")
+            wlog(f"error: pull: cannot protect {len(refused)} local path(s) "
+                 f"with pattern chars; skipping this cycle: {refused[:5]}")
+            _bump("errors")
+            return False, 0
         cmd = ([RSYNC_BIN, WATCH_RSYNC_FLAGS, "--exclude-from=-",
                 f"--chown=:{REPLICA_GROUP}"]
                + _WATCH_REMOTE_RSYNC_OPTS

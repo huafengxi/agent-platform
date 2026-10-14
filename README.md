@@ -16,6 +16,7 @@ anchors:
 |------|------|
 | `ssh-sync.py` | rsync over ssh 目录同步：`push/pull/both` 一次性；`watch` 常驻双向链路（agents/ 跨机同步用，星型拓扑指向 `dev:/data/shared/agents`，见 `@agentd#sync-channel`） |
 | `gc.py` / `test_gc.py` | agents/ 删除传播（gc 机制）及其单测 |
+| `test_protect.py` | 本地属组不可读或原件路径无法安全编码时，整轮 pull 拒绝，避免保护清单缺项 |
 | `test_watch.py` | `watch` 的触发模型、属组闸门传输不变量、同步面排除管道（生产排除面为空）与消费侧铁律的单测（合成树，只用 /tmp） |
 | `replica-tag.py` / `test_replica_tag.py` | 副本标记工具（跨机同步的属组闸门辅助；纯手动一次性工具，不在 agents-sync 服务调用链内）及其单测。归属规则（各族/各文件的 owner = 哪台机器）权威 = 脚本 docstring：信封按 `from` 解宿主、共享信箱的命名空间 ack 按订阅者 `spec.host` 解、`enable.json` 归调度方、解不出一律 UNKNOWN = 不打标 |
 | `mac-rsync-patch/` | mac rsync 补丁（子目录自带 README） |
