@@ -1203,7 +1203,7 @@ def t42_resident_model_error_untouched():
 def t43_heartbeat_prompt_anchor_lines():
     """T43 定时触发面 prompt.md 的两个锚定行与 core.ts::buildPromptMd **同源**（防漂断言）。
 
-    定时触发面（`heartbeats/` 注册表 → 同目录 `register.py`）登记的任务，其 prompt.md
+    常规任务入口（`tasks/run.py`）登记的任务，其 prompt.md
     由 registrar 自写、不经 `buildPromptMd`（agentctl 无 prompt 渲染动词），而 `caps/executor-core` 的「本次任务参数」锚定句（下文所有「任务目录」「本任务 taskId」均指该行）
     与 `caps/executor-leaf` 的「分级门禁」标记都要求
     这两行在 prompt **开头** ⇒ 缺行会让基线那两处引用对该形态悬空。
@@ -1212,7 +1212,7 @@ def t43_heartbeat_prompt_anchor_lines():
     （任一侧改名即红）；② 位置在开头（两行先于「## 需求描述」）；③ 路径按 portablePath 同款口径
     渲染（$HOME 内 → 波浪号）；④ 参数行点名执行机 env。
     """
-    reg_path = os.path.join(HERE, "..", "heartbeats", "register.py")
+    reg_path = os.path.join(HERE, "..", "tasks", "run.py")
     core_path = os.path.join(HERE, "..", *EXT_DIR_PARTS, "core.ts")
     with open(reg_path, encoding="utf-8") as f:
         reg = f.read()
@@ -1225,7 +1225,7 @@ def t43_heartbeat_prompt_anchor_lines():
     seg = core[i:i + 6000]
     for t in tokens:
         ok("T43 core.ts::buildPromptMd 含 token %s" % t, t in seg,
-           "改名/删除 ⇒ 同批改 heartbeats/register.py 与本清单（否则该形态的锚定行会静默漂）")
+           "改名/删除 ⇒ 同批改 tasks/run.py 与本清单（否则该形态的锚定行会静默漂）")
 
     # register.py 侧：build_prompt 的函数体区间（parts 列表即 prompt 落盘顺序）
     j = reg.index("def build_prompt(")
@@ -1288,7 +1288,7 @@ def t45_retired_marker_zero_reflow():
            "命中 ⇒ 豁免面被加回（须同批改回叶子语义并扩 ext 套件断言）")
 
     # ---- c) 登记层与注册表 ----
-    for pat in (("heartbeats",),):
+    for pat in (("heartbeats",), ("tasks",)):
         for root, _dirs, files in os.walk(os.path.join(ws, *pat)):
             for fn in sorted(files):
                 if not fn.endswith((".py", ".md", ".json")):
@@ -1311,7 +1311,7 @@ def t45_retired_marker_zero_reflow():
            "命中 ⇒ 人格面留了机制面已不成立的例外句（照条文办事的模型会去派任务并被 guard 拦）")
 
     # ---- e) spec.command 形态同源（无 env 前缀）----
-    reg = _read("heartbeats", "register.py")
+    reg = _read("tasks", "run.py")
     core = _read(*(EXT_DIR_PARTS + ("core.ts",)))
     m = (re.search(r"^COMMAND = '(.+)'", reg, re.M)
          or re.search(r'^COMMAND = "(.+)"', reg, re.M))
@@ -1437,7 +1437,7 @@ _CMD_PREFIX_SOURCES = (
     ("bots/daemon/*/spec.json", "守护型/进程型 bot 的被追踪声明源（一层形态 = seed 缺省族 bot/）"),
     ("bots/daemon/*/*/spec.json", "同上，两层形态（声明的父目录名 = 族，如 queue/；seed.sh 按层级取族）"),
     ("bots/position-watcher/position-watcher.py", "一次性 handler 的 spawn 命令常量（WRAP_CMD）的写者"),
-    ("heartbeats/register.py", "定时触发面的登记脚本（spec.command 常量）"),
+    ("tasks/run.py", "定时触发面的登记脚本（spec.command 常量）"),
 )
 # `KEY=VAL KEY=VAL … exec|python3|bash` 形态的前缀键（值可含引号/`$`/`{}`）
 _CMD_ENV_PREFIX_RE = re.compile(r"((?:\b[A-Z][A-Z0-9_]*=\S+[ \t]+)+)(?:exec|python3|bash)\b")
