@@ -66,12 +66,14 @@ Invariants (rule bodies):
      the error once per distinct message — a broken edit degrades observability,
      it never kills the daemon and never silently drops a timer (same rule as
      the service layer: a declaration that fails to parse must not disappear
-     from the face it governs).
+     from the face it governs). Schedule/enabled edits invalidate the cached
+     next occurrence; command-only edits preserve its slot.
   4. Any parse/shape failure of a one-shot command (status/fire/check) is a
      config error: exit non-zero with the message, never a silent skip.
   5. Children are spawned as their own session (process-group leader) so a
      timeout can signal the whole tree: TERM, then KILL after the grace period.
-     `timeout` absent = unbounded (the action owns its own bound).
+     `timeout` absent = unbounded (the action owns its own bound). Each running
+     action keeps its spawn-time timeout, even if its timer is edited/deleted.
   6. Stopping the daemon takes its children with it (TERM → grace → KILL):
      no orphan survives a restart of this process.
   7. The child's environment is this process's environment plus the profile's
@@ -91,6 +93,7 @@ Invariants (rule bodies):
 """
 
 import argparse
+from contextlib import ExitStack
 import fcntl
 import json
 import os
@@ -543,23 +546,20 @@ def spawn(profile, timer):
         raise ConfigError(f"{profile['decl'] if 'decl' in profile else timer}: "
                           f"cwd {cwd} is not a directory")
     logf = None
-    fh = None
     logpath = None
-    if profile.get("log"):
-        logp = _abspath(profile["log"])
-        logp.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(logp, "ab")
-        fh.write(f"\n--- {timer} fired {time.strftime(TS)}: "
-                 f"{' '.join(cmd)}\n".encode())
-        fh.flush()
-        logf = fh
-        logpath = str(logp)
-    p = subprocess.Popen(cmd, cwd=str(cwd), env=action_env(profile),
-                         stdout=logf,
-                         stderr=subprocess.STDOUT if logf else None,
-                         stdin=subprocess.DEVNULL, start_new_session=True)
-    if fh:
-        fh.close()          # the child holds its own dup'd fd
+    with ExitStack() as stack:
+        if profile.get("log"):
+            logp = _abspath(profile["log"])
+            logp.parent.mkdir(parents=True, exist_ok=True)
+            logf = stack.enter_context(open(logp, "ab"))
+            logf.write(f"\n--- {timer} fired {time.strftime(TS)}: "
+                       f"{' '.join(cmd)}\n".encode())
+            logf.flush()
+            logpath = str(logp)
+        p = subprocess.Popen(cmd, cwd=str(cwd), env=action_env(profile),
+                             stdout=logf,
+                             stderr=subprocess.STDOUT if logf else None,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
     return p, logpath
 
 
@@ -578,12 +578,9 @@ def poll_nap(nexts, interval, children, now):
 
 def _signal_group(pid, sig):
     try:
-        os.killpg(os.getpgid(pid), sig)
-    except (ProcessLookupError, PermissionError, OSError):
-        try:
-            os.kill(pid, sig)
-        except OSError:
-            pass
+        os.killpg(pid, sig)  # spawn uses start_new_session: pgid == pid.
+    except ProcessLookupError:
+        pass
 
 
 def kill_tree(p, grace=KILL_GRACE):
@@ -594,9 +591,10 @@ def kill_tree(p, grace=KILL_GRACE):
     _signal_group(p.pid, signal.SIGTERM)
     try:
         p.wait(timeout=grace)
-        return
     except subprocess.TimeoutExpired:
         pass
+    # The leader may exit on TERM while a descendant ignores it. Its group
+    # still belongs to this action, even after Popen has reaped the leader.
     _signal_group(p.pid, signal.SIGKILL)
     try:
         p.wait(timeout=grace)
@@ -614,7 +612,7 @@ class Runner:
         self.state_path = state_path or STATE_FILE
         self.hostname = hostname            # None = this machine (platform.node())
         self.state = read_state(self.state_path)
-        self.children = {}          # timer → (Popen, started, logpath)
+        self.children = {}          # timer → (Popen, monotonic start, timeout)
         self.nexts = {}             # timer → epoch | None
         self.run_started = time.time()
         self.last_config_error = None
@@ -641,11 +639,15 @@ class Runner:
             log(f"warning: no timer declaration matches this machine "
                 f"(hostname={this_host()[0]}) — nothing fires here; expected "
                 f"files under {TIMERS_DIR}/")
+        old = {e["timer"]: e for e in self.face}
+        self.nexts = {
+            e["timer"]: self.nexts.get(e["timer"])
+            if e["timer"] in old
+            and e["schedule"] == old[e["timer"]]["schedule"]
+            and e["enabled"] == old[e["timer"]]["enabled"] else None
+            for e in face
+        }
         self.face = face
-        for e in face:
-            self.nexts.setdefault(e["timer"], None)
-        for gone in set(self.nexts) - {e["timer"] for e in face}:
-            self.nexts.pop(gone, None)
 
     def _sched_next(self, entry, now):
         st = self.state.get(entry["timer"], {})
@@ -678,8 +680,7 @@ class Runner:
                     f"(invariant 2)")
                 # Next slot computed WITHOUT last_fire: an interval timer's
                 # cadence would otherwise stay overdue and re-log every round.
-                self.nexts[timer] = next_fire(entry["schedule"], time.time(),
-                                              None, time.time())
+                self.nexts[timer] = next_fire(entry["schedule"], now, None, now)
                 continue
             self.fire(entry, now=now)
             fired += 1
@@ -687,26 +688,27 @@ class Runner:
 
     def fire(self, entry, now=None, wait=False):
         timer = entry["timer"]
+        now = time.time() if now is None else now
         try:
             p, logpath = spawn(entry, timer)
         except (ConfigError, OSError) as e:
             log(f"{timer}: spawn failed: {e}")
             self.state[timer] = dict(self.state.get(timer, {}),
-                                     last_fire=time.time(), last_exit=None,
+                                     last_fire=now, last_exit=None,
                                      last_error=str(e))
             write_state(self.state, self.state_path)
-            self.nexts[timer] = self._sched_next(entry, time.time())
+            self.nexts[timer] = self._sched_next(entry, now)
             return None
-        self.children[timer] = (p, time.time(), logpath)
+        self.children[timer] = (p, time.monotonic(), entry.get("timeout"))
         where = f", log {logpath}" if logpath else ""
         log(f"{timer}: fired pid {p.pid} ({describe(entry['schedule'])}"
             f"{where})")
         self.state[timer] = dict(self.state.get(timer, {}),
-                                 last_fire=time.time(),
+                                 last_fire=now,
                                  fires=self.state.get(timer, {}).get("fires", 0)
                                  + 1)
         write_state(self.state, self.state_path)
-        self.nexts[timer] = self._sched_next(entry, time.time())
+        self.nexts[timer] = self._sched_next(entry, now)
         if wait:
             while timer in self.children:
                 self.reap()
@@ -716,18 +718,16 @@ class Runner:
 
     def reap(self):
         """Collect finished children into the state; enforce `timeout`."""
-        for timer, (p, started, logpath) in list(self.children.items()):
-            entry = next((e for e in self.face if e["timer"] == timer), None)
-            timeout = (entry or {}).get("timeout")
+        for timer, (p, started, timeout) in list(self.children.items()):
             rc = p.poll()
-            if rc is None and timeout and time.time() - started > timeout:
+            if rc is None and timeout and time.monotonic() - started > timeout:
                 log(f"{timer}: action exceeded timeout {timeout:g}s — "
                     f"TERM then KILL its group")
                 kill_tree(p)
                 rc = p.poll()
             if rc is None:
                 continue
-            dur = time.time() - started
+            dur = time.monotonic() - started
             self.children.pop(timer, None)
             self.state[timer] = dict(self.state.get(timer, {}),
                                      last_exit=rc, last_duration=round(dur, 3),
@@ -736,7 +736,7 @@ class Runner:
             log(f"{timer}: action exited {rc} after {dur:.1f}s")
 
     def shutdown(self):
-        for timer, (p, _started, _log) in list(self.children.items()):
+        for timer, (p, _started, _timeout) in list(self.children.items()):
             log(f"stopping: {timer} (pid {p.pid}) goes with the daemon "
                 f"(invariant 6)")
             kill_tree(p)
