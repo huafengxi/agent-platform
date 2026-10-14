@@ -9,7 +9,6 @@ test_wrap.py 钉**发射层与生命周期**（pi argv 逐格、就绪握手、�
 仅标准库（夹具的 cap.yml 用「标量键 + 流式数组」两种形态，与 test_wrap 同款极简序列化）。
 跑法：`python3 pi-wrap/test_persona.py`（退出码 0 = 全绿）。
 """
-import importlib.util
 import json
 import os
 import shutil
@@ -21,14 +20,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import persona                                                  # noqa: E402
-
-# 任务基线能力名的**单一事实源** = `bots/cap_lint.py::BASELINE_CAP`（提交期判据 E17 用它）
-# ⇒ 本文件按路径导入它、⛔ 抄第二份字面量（抄了就会在下次改名时静默漂成假红/假绿）。
-_spec = importlib.util.spec_from_file_location(
-    "cap_lint_persona_t", os.path.join(HERE, "..", "bots", "cap_lint.py"))
-_cap_lint = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_cap_lint)
-BASELINE_CAP = _cap_lint.BASELINE_CAP
 
 PASS = 0
 FAIL = 0
@@ -628,59 +619,6 @@ def p12_cli():
         t.cleanup()
 
 
-# ---------- P13 真实资产面（在场则核，不在场跳过） ----------
-
-# 现网形态映射（验收面：本批把形态轴收进 profile 的逐枚落点）；名单外的 profile 只核通用判据。
-REAL_FORMS = {"executor": persona.FORM_TASK, "review": persona.FORM_TASK,
-              "dispatcher": persona.FORM_RESIDENT, "moderator": persona.FORM_RESIDENT,
-              "work-lead": persona.FORM_RESIDENT,
-              "command-center": persona.FORM_INTERACTIVE}
-
-
-def p13_real_assets():
-    ws = os.path.normpath(os.path.join(HERE, ".."))
-    if not os.path.isdir(os.path.join(ws, "bots", "profiles")):
-        ok("P13 真实资产不在本快照内 → 跳过", True)
-        return
-    names = sorted(f[:-5] for f in os.listdir(os.path.join(ws, "bots", "profiles"))
-                   if f.endswith(".json"))
-    bad, forms = [], {}
-    for n in names:
-        r = persona.resolve(ws, profile=n, emit=lambda *a: None)
-        forms[n] = r["form"]
-        if r["schemaVersion"] != 1:
-            bad.append((n, r["form"], "schemaVersion != 1"))
-        # 注入面非空的要求**按形态分档**：task 档必带基线能力 ⇒ caps 与 appendParts 都非空；
-        # resident/interactive 档的**零 cap 是合法声明**（装配层接受 `caps: []` ⇒ 注入面为空、
-        # ask_user 保留）⇒ 只要求「caps 与注入正文同空同非空」（不一致 = 装配失真）。
-        if r["form"] == persona.FORM_TASK:
-            if not r["caps"] or not r["appendParts"]:
-                bad.append((n, r["form"], "task 档注入面为空：%s" % r["caps"]))
-        elif bool(r["caps"]) != bool(r["appendParts"]):
-            bad.append((n, r["form"], "caps 与注入正文不同空同非空：%s" % r["caps"]))
-        if r["appendParts"] and any(not p.strip() for p in r["appendParts"]):
-            bad.append((n, r["form"], "空正文"))
-        if r["form"] not in persona.FORMS:
-            bad.append((n, r["form"], "form 不在三档值域"))
-        if n in REAL_FORMS and r["form"] != REAL_FORMS[n]:
-            bad.append((n, r["form"], "现网映射期望 %s" % REAL_FORMS[n]))
-        if r["form"] == persona.FORM_TASK:
-            # 安全不变量（声明面承担、cap_lint E17 提交期兜）：基线能力在首位 ∧ 排除 ask_user
-            if not r["caps"] or r["caps"][0] != BASELINE_CAP:
-                bad.append((n, r["form"], "caps 首位非基线能力 %s：%s" % (BASELINE_CAP, r["caps"])))
-            if "ask_user" not in r["excludeTools"]:
-                bad.append((n, r["form"], "excludeTools 漏 ask_user：%s" % r["excludeTools"]))
-        else:
-            if r["fallback"]:
-                bad.append((n, r["form"], "非 task 档却走了回落"))
-    ok("P13 现网全部 profile 解析成功、注入面**按形态分档**合规（task 档非空 ∧ 基线在首位；"
-       "resident/interactive 档零 cap 合法）、form 声明与现网映射逐枚相符"
-       "（%d 个 profile：%s）" % (len(names), json.dumps(forms, ensure_ascii=False)),
-       not bad, bad)
-
-
-
-
 # ---------- P14 knowledge 三档（真 kb_index，迁自 argv 形态的 T35/T28） ----------
 
 PT = "# domain persona\n"
@@ -957,10 +895,6 @@ def p17_form_axis():
            persona.FORMS == ("task", "resident", "interactive")
            and persona.FORM_DEFAULT == persona.FORM_TASK and persona.FORM_FIELD == "form",
            (persona.FORMS, persona.FORM_DEFAULT, persona.FORM_FIELD))
-        ok("P17f 解析层已无形态基线常量（TASK_BASELINE_CAP / FORM_XT_BASELINE 退役）",
-           not hasattr(persona, "TASK_BASELINE_CAP")
-           and not hasattr(persona, "FORM_XT_BASELINE"),
-           [n for n in ("TASK_BASELINE_CAP", "FORM_XT_BASELINE") if hasattr(persona, n)])
     finally:
         t.cleanup()
 
@@ -1044,13 +978,14 @@ def p18_toc():
 
 
 def main():
-    for fn in (p1_contract, p2_caps, p2b_bundle_and_missing, p3_fallback, p4_knowledge,
+    tests = (p1_contract, p2_caps, p2b_bundle_and_missing, p3_fallback, p4_knowledge,
                p5_tools, p6_bundles, p8_provider, p9_cc, p10_warnings, p11_equivalence,
-               p12_cli, p13_real_assets, p14_knowledge_tiers,
-               p15_profile_banned_fields, p16_cap_degradation, p17_form_axis, p18_toc):
+               p12_cli, p14_knowledge_tiers,
+               p15_profile_banned_fields, p16_cap_degradation, p17_form_axis, p18_toc)
+    for fn in tests:
         print("---- %s" % fn.__name__)
         fn()
-    print("==== persona 单测：%d passed, %d failed" % (PASS, FAIL))
+    print("==== persona：%d 用例组；断言 %d passed, %d failed" % (len(tests), PASS, FAIL))
     return 1 if FAIL else 0
 
 

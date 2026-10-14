@@ -188,6 +188,8 @@ python3 test_wrap.py          # emission + lifecycle: argv/env, handshake, conve
                              # exit codes; no network, no real pi
 ```
 
+解析层使用合成资产验证机制；调用方的岗位政策与现有资产由调用方检查。仅修改能力正文或profile声明时，运行调用方的资产检查；修改解析或生命周期代码时，运行对应测试。
+
 `test/toolface-harness/` — live-session evidence harness (real pi + real model slot); not invoked by `test_wrap.py`; excluded from CI. Single source: `test/toolface-harness/README.md`.
 
 `fakepi_rpc.py` is the `pi --mode rpc` double: it speaks the same JSON-lines
