@@ -319,11 +319,12 @@ def load_profiles(profiles_dir=None):
         if "name" in data and str(data["name"]) != name:
             sys.exit(f"error: {path}: 'name' is {data['name']!r} but the file "
                      f"stem is {name!r} — the filename is the single source")
-        if "version" in data and not isinstance(data["version"], int):
+        if type(data.get("version")) is not int:
             sys.exit(f"error: {path}: 'version' must be an integer, got "
-                     f"{data['version']!r}")
+                     f"{data.get('version')!r}")
         data.pop("name", None)
         data["name"] = name
+        _validate_entry(data)
         out[name] = data
     if not out:
         sys.exit(f"error: no service profiles under {profiles_dir or PROFILES_DIR}")
@@ -410,15 +411,7 @@ def services_here(hostname=None, profiles=None, daemons=None,
 
 
 def _probe_actual(svc):
-    """'online' or 'offline' — the in-process equivalent of `serviced.py status
-    <name>`; a `_validate_entry` failure (sys.exit) counts offline, the verdict
-    a non-zero probe exit would give."""
-    try:
-        _validate_entry(svc)
-    except SystemExit as e:
-        print(f"warning: {svc.get('name')}: invalid entry ({e}); "
-              "treated as offline", file=sys.stderr)
-        return "offline"
+    """Probe a definition already validated by the registry loader."""
     ok, _ = probe_online(svc)
     return "online" if ok else "offline"
 
@@ -525,9 +518,9 @@ def _print_runtime(runtime, no_reading, w):
 
 def cmd_status():
     rows = gather()
-    w = max(len(s["name"]) for s, _, _ in rows)
-    wv = max(max(len(str(s.get("version", "-"))) for s, _, _ in rows),
-             len("VERSION"))
+    w = max([len("SERVICE")] + [len(s["name"]) for s, _, _ in rows])
+    wv = max([len("VERSION")] +
+             [len(str(s.get("version", "-"))) for s, _, _ in rows])
     print(f"{'SERVICE':<{w}}  {'VERSION':<{wv}} {'DESIRED':<8} {'ACTUAL':<8} STATE")
     print(f"{'-'*w}  {'-'*wv} {'-'*8} {'-'*8} -----")
     n_drift = 0
@@ -589,6 +582,20 @@ def _run_action(name, act):
     return (rc or 0), f"exit {rc}"
 
 
+def sync_plan(rows):
+    """Build a reconciliation plan from one observed registry snapshot."""
+    for svc, actual, drift in rows:
+        name = svc["name"]
+        if drift:
+            want = svc["desired"]
+            yield (f"[sync] {name}: desired={want} actual={actual}",
+                   name, ["start" if want == "online" else "stop"])
+        elif svc["desired"] == "online":
+            _, note, stale = _version_fields(svc, actual)
+            if stale:
+                yield f"[sync] {name}: {note}, restarting", name, ["stop", "start"]
+
+
 def cmd_sync():
     """Reconcile both drift kinds:
     ① desired-vs-actual — start what should be online but is offline, stop
@@ -599,22 +606,11 @@ def cmd_sync():
     with a missing meta are never stale and so are never touched. Rows act in
     services_here() order (service name); the start/stop calls run in-process
     (`_run_action`) and one failing action never aborts the rest."""
-    rows = gather()
-    actions = []  # [(action line, name, [act, ...])], act ∈ (start, stop)
-    for svc, actual, drift in rows:
-        name = svc["name"]
-        if drift:
-            want = svc["desired"]
-            actions.append((f"[sync] {name}: desired={want} actual={actual}",
-                            name, ["start" if want == "online" else "stop"]))
-            continue  # desired=offline+online → stop only, never a restart
-        _, vnote, stale = _version_fields(svc, actual)
-        if stale and svc["desired"] == "online":
-            actions.append((f"[sync] {name}: {vnote}, restarting",
-                            name, ["stop", "start"]))
+    actions = list(sync_plan(gather()))
     if not actions:
         print("no drift, nothing to do")
         return 0
+    failed = False
     for line, name, acts in actions:
         # flush: our stdout is block-buffered when piped (rsh / dash widget),
         # so the action line must not land after the start/stop output.
@@ -622,10 +618,13 @@ def cmd_sync():
         for act in acts:
             rc, why = _run_action(name, act)
             if rc:
+                failed = True
                 print(f"  !! {name}.{act} failed ({why})")
+                break  # A failed stop must never be followed by a start.
     # re-check
     print("\n--- after sync ---")
-    return cmd_status()
+    status_rc = cmd_status()
+    return 1 if failed else status_rc
 
 
 def human_iec(n):
@@ -1036,8 +1035,12 @@ def _expand(args):
 
 
 def _validate_entry(svc):
-    """Reject malformed lifecycle definitions at the point of use."""
+    """Reject malformed lifecycle definitions once, while loading the registry."""
     name = svc.get("name")
+    cmd = svc.get("cmd")
+    if (not isinstance(cmd, list) or not cmd
+            or not all(isinstance(arg, str) and arg for arg in cmd)):
+        sys.exit(f"error: service {name!r}: cmd must be a non-empty argv array")
     wrapper = svc.get("wrapper", "svc")
     if wrapper not in ("svc", "none"):
         sys.exit(f"error: service {name!r}: wrapper must be 'svc' or 'none', "
@@ -1140,11 +1143,7 @@ def build_env(svc):
 
 def cmd_start_name(name):
     svc = svc_entry(name)
-    _validate_entry(svc)
     cmd = svc.get("cmd")
-    if not cmd:
-        sys.exit(f"error: service {name!r} has no 'cmd' in "
-                 f"{PROFILES_DIR / (name + '.json')}")
     wrapper = svc.get("wrapper", "svc")
     # Version drift detection order: READ the declared version first → launch
     # → only after start confirmation WRITE the meta (it records "the
@@ -1202,18 +1201,18 @@ def cmd_start_name(name):
         time.sleep(1)
     print(f"{name}: start command returned but probe not online within "
           f"{timeout}s — meta not written (status will show 运行 v?)")
-    return 0
+    return 1
 
 
 def cmd_stop_name(name):
     svc = svc_entry(name)
-    _validate_entry(svc)
     if svc.get("stop_cmd"):
         # external runner owns its own shutdown (its declared stop verb)
         r = subprocess.run(_expand(svc["stop_cmd"]), cwd=str(WS),
                            env=clean_env())
-        pidfile(name).unlink(missing_ok=True)
-        metafile(name).unlink(missing_ok=True)
+        if r.returncode == 0:
+            pidfile(name).unlink(missing_ok=True)
+            metafile(name).unlink(missing_ok=True)
         print(f"{name} stopped (stop_cmd exit {r.returncode})")
         return r.returncode
 
@@ -1245,9 +1244,12 @@ def cmd_stop_name(name):
     msg = f"{name} stopped (pid {gone})"
     if stubborn:
         msg += f" [SIGKILL needed: {stubborn}]"
-    if any(pid_alive(t) for t in targets):
+    alive = any(pid_alive(t) for t in targets)
+    if alive:
         msg += " WARNING: some targets still alive"
     print(msg)
+    if alive:
+        return 1  # Keep the surviving run's pidfile and meta for the next retry.
     pidfile(name).unlink(missing_ok=True)
     # version meta belongs to the stopped run; removing it keeps "missing
     # meta => ?" honest if the service is later started outside serviced.py
@@ -1257,7 +1259,6 @@ def cmd_stop_name(name):
 
 def cmd_status_name(name):
     svc = svc_entry(name)
-    _validate_entry(svc)
     ok, detail = probe_online(svc)
     st = svc.get("status")
     if isinstance(st, dict) and "cmd" in st and detail:

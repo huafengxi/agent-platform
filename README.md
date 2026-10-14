@@ -16,6 +16,7 @@
 - `serviced.py`：服务生命周期唯一执行层（读两层 JSON 注册表 → start/stop/status/sync/trim）。机制语义的单一事实源 = 它的模块 docstring（注册表形态与本机面、全部子命令、Pointers、Invariants：drift 判据、规范 PATH、meta 形态与运行态读数、pid 复用护栏、trim 语义等）+ 各函数 docstring 与行内注释 ⇒ 本 README 不复述、只留下面两条入口性事实。
 - `sync-loop.sh`：常驻纠偏循环——每 `SERVICED_SYNC_INTERVAL` 秒（缺省 60）跑一次 `serviced.py sync`，由调用方以一枚服务声明跑它（服务名与逐机期望态不在本仓）。为何是「壳 + 独立进程组的子进程」而不是给 sync 加一个 `--loop`（sync 会把自己按 stale 停掉）、停它自身的语义、日志与静默口径 = 其头注。
 - `test_serviced_path.py` / `test_registry.py`：`canonical_path()` 与两层注册表 loader 的语义回归网（合成夹具，不启停服务；后者含 config error 全枚举与本机空面告警）。
+- `test_lifecycle.py`：空服务面、加载期校验、纠偏失败隔离与停止失败保留运行记录的回归。
 - 零第三方依赖（Python 3 标准库）。
 
 入口性事实（调用方最常踩的两条，权威仍在代码内）：注册表的任何解析/校验失败一律 config error 退出、不静默跳过（一份解析不了的声明不能从它治理的面上消失）；本机零声明不是错误但只给 stderr 一行告警，此时 `status` 会打出健康的 `0 drift` ⇒ 判健康先看服务计数。
