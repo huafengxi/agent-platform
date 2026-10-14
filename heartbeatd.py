@@ -710,11 +710,15 @@ class Runner:
         write_state(self.state, self.state_path)
         self.nexts[timer] = self._sched_next(entry, now)
         if wait:
-            while timer in self.children:
-                self.reap()
-                time.sleep(0.2)
+            self.wait(timer)
             return self.state.get(timer, {}).get("last_exit")
         return p
+
+    def wait(self, timer=None, stopped=lambda: False):
+        """Drain one action or all children; a stop request leaves cleanup to shutdown."""
+        while self.children and (timer is None or timer in self.children) and not stopped():
+            self.reap()
+            time.sleep(0.2)
 
     def reap(self):
         """Collect finished children into the state; enforce `timeout`."""
@@ -800,9 +804,7 @@ def cmd_run(argv):
             if args.once:
                 # A single round must not kill what it just fired: wait the
                 # children out (their own `timeout` still applies via reap).
-                while runner.children:
-                    runner.reap()
-                    time.sleep(0.2)
+                runner.wait(stopped=lambda: stop["flag"])
                 break
             if stop["flag"]:
                 break
@@ -899,8 +901,10 @@ def cmd_fire(argv):
                  f"(declared: {', '.join(e['timer'] for e in face) or '-'})")
     runner = Runner()
     runner.face = face
-    rc = runner.fire(entry, wait=True)
-    runner.shutdown()
+    try:
+        rc = runner.fire(entry, wait=True)
+    finally:
+        runner.shutdown()
     print(f"{name}: action exited {rc}")
     return 0 if rc == 0 else 1
 

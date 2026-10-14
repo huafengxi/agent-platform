@@ -72,6 +72,55 @@ class ReloadTests(unittest.TestCase):
                 hb._signal_group(process.pid, hb.signal.SIGKILL)
                 process.wait(timeout=5)
 
+    def test_once_sigterm_interrupts_wait_and_cleans_up_action(self):
+        import json
+        import os
+        import platform
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            registry = root / "heartbeats"
+            (registry / "profiles").mkdir(parents=True)
+            (registry / "timers").mkdir()
+            (registry / "profiles/a.json").write_text(json.dumps({
+                "cmd": [sys.executable, "-c", "import time; time.sleep(30)"]}))
+            (registry / "timers/test.t.json").write_text(json.dumps({
+                "hostname": platform.node(), "profile": "a",
+                "schedule": {"interval": {"seconds": 1}}}))
+            state = root / "state.json"
+            state.write_text(json.dumps({"t": {"last_fire": time.time() - 60}}))
+            env = dict(os.environ, HEARTBEATD_ROOT=str(root),
+                       HEARTBEATD_STATE=str(state), HEARTBEATD_HOST_ID=str(root / "host-id"))
+            process = subprocess.Popen([sys.executable, str(Path(hb.__file__)), "run", "--once"],
+                                       env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       text=True)
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if json.loads(state.read_text()).get("t", {}).get("fires") == 1:
+                        break
+                    time.sleep(.02)
+                else:
+                    self.fail("action was not started")
+                process.terminate()
+                output = process.communicate(timeout=5)[0]
+                self.assertEqual(process.returncode, 0, output)
+                self.assertIn("stopped", output)
+                self.assertLess(json.loads(state.read_text())["t"]["last_exit"], 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                process.stdout.close()
+
+    def test_manual_fire_interrupt_runs_shutdown(self):
+        runner = Mock()
+        runner.fire.side_effect = KeyboardInterrupt
+        with patch.object(hb, "load_registry", return_value=({}, [self.entry])), \
+             patch.object(hb, "Runner", return_value=runner):
+            with self.assertRaises(KeyboardInterrupt):
+                hb.cmd_fire(["t"])
+        runner.shutdown.assert_called_once_with()
+
     def test_group_escalation_even_if_leader_exits_on_term(self):
         process = Mock(pid=12345)
         with patch.object(hb, "_signal_group") as send:
