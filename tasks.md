@@ -6,41 +6,41 @@
 本页只引用、不写死政策取值（改保留期不产生本仓 diff）。
 -->
 
+## 异常与阻塞
+
+${agentd/report.py -s abnormal}
+
 ## 未终态任务
 
 ${agentd/report.py -s active}
 
-## 调度基础设施健康度
-
-${agentd/report.py -s system}
-
-## task/bot 两族状态计数
-
-${agentd/report.py -s stats}
-
-## 失败/心跳停滞/应跑未跑/基础设施异常集中区
-
-${agentd/report.py -s abnormal}
-
-## bot 族常驻/一次性进程状态
-
-${agentd/report.py -s bots}
-
-## topic 协作容器
-
-${agentd/report.py -s topics}
-
-## 最近 10 个终态任务
+## 最近终态
 
 ${agentd/report.py -s recent}
 
-## 旧 task 清理
+<details>
+<summary>基础设施与状态统计</summary>
 
-${python3 dash/gc-tasks.py report}
+## 基础设施健康
 
-${!python3 dash/gc-tasks.py run --yes}
+${agentd/report.py -s system}
 
-## 说明
+## 状态统计
+
+${agentd/report.py -s stats}
+
+## bot 状态
+
+${agentd/report.py -s bots}
+
+## topic
+
+${agentd/report.py -s topics}
+
+</details>
+
+<details>
+<summary>说明与操作口径</summary>
 
 - 调度基础设施健康度：各 host runner / scheduler / agents-sync 链路
 - 调度基础设施健康度（口径）：runner 判活 = `agents/run/agentd.<host>.lock` 的 updatedAt 新鲜度，阈值取 `scheduler.HOST_ALIVE_THRESHOLD`（当前 60s，复用调度门禁判活口径）；agents-sync 链路为间接口径——远端锁由远端 runner 写、经同步链路到达 dev，内容新鲜即同时证明「远端 runner 活 + 同步链路通」（✅ 双活）；dev 为 hub 无本地同步链路
@@ -56,3 +56,14 @@ ${!python3 dash/gc-tasks.py run --yes}
 - 旧 task 清理·删除范围：**整个 `task/<id>/` 目录**（`report.md`/`prompt.md`/`plan.md`/`progress.md` 与 `session/` 转录一并消失，不可逆）⇒ 账本（`lore/desk/`）与域册（`lore/library/`）里指向 `agents/task/<id>/report.md` 的指针会断；裁定与重议触发 = `lore/library/dispatch/facts/deletion-gc.md`
 - 旧 task 清理·两枚 widget 的分工：只读表 = 当前候选读数（空态只出表头 = 无可清理项，不是扫描失败）；橙色按钮 = 变更，点一次跑完整轮（分批入 delete-list → 等通道宽限 → reap → 核验），耗时 ≈ 宽限期 5 分钟 + 数十秒，期间每 60s 出一行进度
 - 旧 task 清理·执行点恒为 GC hub：widget 命令在**浏览器所连的那台 w 服务**上执行，而删除只允许落在 hub 的权威树 ⇒ 非 hub 上点这个按钮会被拒绝（不写清单、不删）；hub 侧删除后各机副本由 agents-sync 的 pull 侧按清单自行收敛（不在按钮的等待窗内）
+
+</details>
+
+<details>
+<summary>旧任务清理（手动）</summary>
+
+${python3 dash/gc-tasks.py report}
+
+${!python3 dash/gc-tasks.py run --yes}
+
+</details>
