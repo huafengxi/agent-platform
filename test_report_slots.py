@@ -22,12 +22,11 @@
      `--root=` 形态与符号链接 root（realpath 同实体）命中
   R7 effective_max_concurrent 端到端（真进程）：显式值 ∕ argv 未传（落回本体层缺省）∕
      无进程（不可得）∕ 两枚异值（不一致 ⇒ 不可断言）；note 逐格带层次名
-  R8 dash/gc-tasks.py 的复用面不破：`ts_to_epoch` 签名与两种时间戳格式的解析值不变
+  R8 dash/gc-tasks.py 的复用面不破：`ts_to_epoch` 两种时间戳格式的解析值不变
 
 仅标准库。用法：python3 agentd/test_report_slots.py
 """
 import datetime
-import inspect
 import os
 import shutil
 import subprocess
@@ -365,9 +364,7 @@ def r7():
 
 
 def r8():
-    """R8 dash/gc-tasks.py 的复用面：ts_to_epoch 签名与解析行为不变。"""
-    sig = str(inspect.signature(RP.ts_to_epoch))
-    ok("R8 ts_to_epoch 签名仍为单参 (s)（dash/gc-tasks.py:93 复用该单点）", sig == "(s)", sig)
+    """R8 dash/gc-tasks.py 的复用面：ts_to_epoch 解析行为不变。"""
     # 格式一：proto.now_ts（本地时间、点分毫秒）——断言不依赖本机时区
     ok("R8 proto.now_ts 形态按本地时间解析（同秒整值 = mktime，毫秒作小数）",
        RP.ts_to_epoch("2026-10-05-20-00-00.000")

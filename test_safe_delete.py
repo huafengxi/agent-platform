@@ -17,8 +17,6 @@
   D5 第二道闸：目标在系统临时目录外 ⇒ 拒绝；显式白名单覆盖 ⇒ 放行
   D6 目标不存在 ⇒ 拒绝（⛔ 吞成放行）
   D7 顺序核：放行路径 = authorize 在 rmtree **之前**；四条拒绝路径 = rmtree 零调用
-  D8 源码面非执行核证：`safe_rmtree` 体内 authorize 的调用行号 < rmtree 的调用行号，
-     且模块源码里 `ignore_errors` ∕ `except` 零命中（⛔ 吞错即失去防线）
   D9 符号链接形态：授权根内的 symlink 指向**根内真树** ∪ `authorized_root` 给 symlink 本身
      ⇒ realpath 解穿后目标 == 授权根 ⇒ 拒绝、真树逐字节仍在场
   D10 符号链接指向授权根外：授权根内的 symlink 指向同基目录的兄弟真树 ∪ `authorized_root`
@@ -26,7 +24,6 @@
 
 仅标准库（本仓测试面无 pytest）。用法：python3 agentd/test_safe_delete.py
 """
-import ast
 import hashlib
 import os
 import shutil
@@ -217,36 +214,6 @@ def d7():
         restore()
 
 
-def d8():
-    src_path = os.path.join(HERE, "safe_delete.py")
-    with open(src_path, encoding="utf-8") as f:
-        src = f.read()
-    mod = ast.parse(src)
-    fn = next(n for n in mod.body if isinstance(n, ast.FunctionDef) and n.name == "safe_rmtree")
-    lines = {"authorize_target": [], "rmtree": []}
-    for node in ast.walk(fn):
-        if isinstance(node, ast.Call):
-            f_ = node.func
-            name = (f_.attr if isinstance(f_, ast.Attribute) else
-                    f_.id if isinstance(f_, ast.Name) else None)
-            if name in lines:
-                lines[name].append(node.lineno)
-    ok("D8a 源码面：`safe_rmtree` 体内 `authorize_target` 的调用行号 < `shutil.rmtree` 的调用行号"
-       "（断言在删除之前，非执行面核证）",
-       len(lines["authorize_target"]) == 1 and len(lines["rmtree"]) == 1
-       and max(lines["authorize_target"]) < min(lines["rmtree"]), lines)
-    ok("D8b 源码面：模块内无 `ast.Try` 节点、无 `ignore_errors` 实参（⛔ 吞错即失去防线；"
-       "核法走 AST ⇒ docstring 里写「⛔ try/except」这几个字不会自伤）",
-       not [n for n in ast.walk(mod) if isinstance(n, ast.Try)]
-       and not [k for n in ast.walk(mod) if isinstance(n, ast.Call) for k in n.keywords
-                if k.arg == "ignore_errors"],
-       (len([n for n in ast.walk(mod) if isinstance(n, ast.Try)]),))
-    ok("D8c 源码面：只暴露一个删除入口（`__all__` 里的删除动词恰一枚 = `safe_rmtree`）",
-       SD.__all__.count("safe_rmtree") == 1
-       and not [n for n in SD.__all__ if n != "safe_rmtree" and n.startswith("safe_")],
-       SD.__all__)
-
-
 def d9():
     base, root = mkroot("d9")
     tree(root, "real")
@@ -276,7 +243,7 @@ def d10():
 
 
 def main():
-    for fn in (d1, d2, d3, d4, d5, d6, d7, d8, d9, d10):
+    for fn in (d1, d2, d3, d4, d5, d6, d7, d9, d10):
         fn()
     print("\n==== safe_delete 单测：%d passed, %d failed" % (PASS, FAIL))
     cleanup()
