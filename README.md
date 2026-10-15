@@ -17,13 +17,13 @@
 
 ## 安装
 
-将本仓放到调用方工作区下，然后执行：
+将本仓放到调用方工作区下，使用仓内模块路径调用 CLI，例如：
 
 ```bash
-python3 install.py --workspace /path/to/workspace
+python3 agent-platform/agentd/agentctl.py --help
 ```
 
-安装器为六个模块建立工作区入口软链接；已有非链接目录会拒绝，须由调用方先保存和迁出。模块 CLI 名称保持不变。调用方显式提供服务注册表、启动器与配置；安装本身不启动进程。
+调用方显式提供服务注册表、启动器与配置。各模块监督壳按自身目录定位实现脚本。
 
 工作区根由入口路径现场发现。直接调用仓内模块时缺省取平台仓的父目录，也可用 `PLATFORM_WORKSPACE` 覆盖；模块已有的 `--root` 和专用环境变量优先。各模块用法见其 README。
 
@@ -33,4 +33,4 @@ python3 install.py --workspace /path/to/workspace
 python3 test.py --workspace /path/to/workspace --integration
 ```
 
-统一入口运行安装契约、六模块回归及可选端到端场景，失败返回非零；`--module` 可选单模块。测试只写临时沙箱。调用方提供角色、扩展与解密器资产；各模块的单独回归入口仍见其 README。
+统一入口运行工作区路径契约、六模块回归及可选端到端场景，失败返回非零；`--module` 可选单模块。测试只写临时沙箱。调用方提供角色、扩展与解密器资产；各模块的单独回归入口仍见其 README。

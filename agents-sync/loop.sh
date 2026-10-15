@@ -63,7 +63,7 @@
 
 MODULE_DIR="$(cd "$(dirname "$0")" && pwd -P)" || exit 1
 WS="$(python3 "${MODULE_DIR}/../platform_paths.py" "$0")" || exit 1
-SYNC="$WS/agents-sync/ssh-sync.py"
+SYNC="${MODULE_DIR}/ssh-sync.py"
 LOG="$WS/run/logs/agents-sync.log"
 mkdir -p "$WS/run/logs"
 
