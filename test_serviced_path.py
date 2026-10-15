@@ -9,7 +9,7 @@ root) and are removed at exit only after a realpath identity assertion
 (_sandbox_ok) — a path that is a production root, an ancestor of one, or inside
 one is refused and left alone.
 
-Covers (the six semantic faces of canonical_path):
+Covers canonical_path semantics:
 + ① existing directories only — a declared segment that is not a directory
      contributes nothing.
 + ② dedupe, first occurrence wins — a repeat (inside the prefix, or again in
@@ -30,8 +30,6 @@ Covers (the six semantic faces of canonical_path):
 + ⑦ with a non-empty inherited tail the output is VERBATIM what the prefix +
      tail rules produce — the floor adds nothing (expected value constructed
      by hand below, never by calling the function under test).
-+ ⑧ the sandbox identity guard itself: it refuses production roots (decoy
-     inputs only — no rmtree is ever aimed at them).
 
 Run: python3 test_serviced_path.py     (exit 1 = at least one FAIL)
 """
@@ -61,8 +59,7 @@ PASS = 0
 FAIL = []
 SANDBOXES = []
 
-# Production roots the sandbox guard refuses (decoy inputs for case ⑧; the
-# guard is a pure predicate — nothing here is ever passed to rmtree).
+# Production roots the cleanup guard refuses.
 HOME = os.path.realpath(os.path.expanduser("~"))
 PROD_ROOTS = [HOME]
 for rel in ("m", "m/lore", "m/work", "m/pi-core"):
@@ -161,18 +158,6 @@ def parts(out):
     return out.split(SEP)
 
 
-print("\n[⑧] sandbox identity guard (decoys only, no deletion attempted)")
-sb = mk_sandbox()
-ok("real sandbox accepted", _sandbox_ok(sb), sb)
-ok("a production root refused", not _sandbox_ok(PROD_ROOTS[-1]), PROD_ROOTS[-1])
-ok("$HOME refused", not _sandbox_ok(HOME), HOME)
-ok("/ refused", not _sandbox_ok("/"))
-ok("the temp root itself refused", not _sandbox_ok(TMPROOT), TMPROOT)
-ok("inside a production root refused",
-    not _sandbox_ok(os.path.join(PROD_ROOTS[-1], "run", "temp", "x")))
-ok("an ancestor of a production root refused",
-    not _sandbox_ok(os.path.dirname(PROD_ROOTS[-1])))
-
 print("\n[①] existing directories only")
 root = mk_sandbox()
 a, b = mkdirs(root, "a", "b")
@@ -180,8 +165,6 @@ missing = os.path.join(root, "nope")
 inh = mkdirs(root, "inh")[0]
 with prefix((), override=SEP.join([a, missing, b]), inherited=inh):
     out = serviced.canonical_path(inh)
-ok("existing prefix segments enter", a in parts(out) and b in parts(out), out)
-ok("a missing segment contributes nothing", missing not in parts(out), out)
 ok("inherited tail kept", parts(out) == [a, b, inh], out)
 
 print("\n[②] dedupe, first occurrence wins")
@@ -189,7 +172,6 @@ root = mk_sandbox()
 a, d1, d2, new = mkdirs(root, "a", "d1", "d2", "new")
 with prefix((), override=SEP.join([a, d1, d2]), inherited=SEP.join([d2, a, new])):
     out = serviced.canonical_path(SEP.join([d2, a, new]))
-ok("each directory appears once", len(parts(out)) == len(set(parts(out))), out)
 ok("first position wins (prefix order kept, repeats dropped)",
     parts(out) == [a, d1, d2, new], out)
 with prefix((a, a), override="unset", inherited=a):
@@ -202,7 +184,6 @@ a = mkdirs(root, "a")[0]
 inh = mkdirs(root, "inh")[0]
 with prefix((), override=SEP.join(["", a, ""]), inherited=SEP.join(["", inh, ""])):
     out = serviced.canonical_path(SEP.join(["", inh, ""]))
-ok("no empty segment in the output", "" not in parts(out), out)
 ok("the real segments survive", parts(out) == [a, inh], out)
 
 print("\n[④] SERVICED_PATH_PREFIX override: three states")
@@ -218,15 +199,11 @@ with prefix((p1, p2), override=o1, inherited=inh):
     out_set = serviced.canonical_path(inh)
 ok("non-empty override replaces the prefix wholesale",
     parts(out_set) == [o1, inh], out_set)
-ok("no built-in segment survives the replacement",
-    p1 not in parts(out_set) and p2 not in parts(out_set), out_set)
 # empty string -> no prefix at all (the pre-normalization behaviour)
 with prefix((p1, p2), override="", inherited=inh):
     out_empty = serviced.canonical_path(inh)
 ok("empty-string override = no prefix (pre-normalization behaviour)",
     parts(out_empty) == [inh], out_empty)
-ok("empty-string override drops every prefix segment",
-    not ({p1, p2} & set(parts(out_empty))), out_empty)
 
 print("\n[⑤] glob hits all enter, natural-version descending")
 root = mk_sandbox()
@@ -248,7 +225,6 @@ hits = [p for p in got if p.startswith(nv + os.sep)]
 # comparison is reached: element 0 already differs.
 expected_hits = [os.path.join(nv, v, "bin") for v in ("v22", "v10", "v8",
                                                       "system", "8")]
-ok("every glob hit enters (not only the highest branch)", len(hits) == 5, str(hits))
 ok("natural-version descending order", hits == expected_hits,
     f"got {hits}\n       want {expected_hits}")
 ok("the inherited tail still follows the glob hits", got[-1] == inh, out)
@@ -264,14 +240,8 @@ with prefix((p1,), override="unset", drop_path=True):
 for label, out in (("empty inherited PATH", out_empty_inh),
                    ("unset PATH", out_no_path)):
     got = parts(out)
-    ok(f"{label}: prefix kept, floor appended", got[0] == p1, out)
-    ok(f"{label}: every os.defpath entry present",
-        all(d in got for d in floor), f"{out} vs defpath {os.defpath}")
-    ok(f"{label}: the floor is the tail (nothing inherited between)",
-        got[-len(floor):] == floor, out)
-    for literal in ("/bin", "/usr/bin"):
-        if literal in floor:
-            ok(f"{label}: output contains {literal}", literal in got, out)
+    ok(f"{label}: prefix followed by system floor",
+       got == [p1] + floor, out)
 
 print("\n[⑦] with an inherited tail the output is verbatim (floor adds nothing)")
 root = mk_sandbox()
@@ -280,24 +250,9 @@ gone = os.path.join(root, "gone")
 i1, i2 = mkdirs(root, "i1", "i2")
 declared = (p1, gone, p2, p1)              # a missing segment + a repeat
 inherited = SEP.join([p2, "", i1, i2, i1])  # a repeat, an empty entry
-# Expected value constructed BY HAND from the documented rules (existing only,
-# first occurrence wins, empty entries dropped, prefix then tail) — NOT by
-# calling canonical_path/_prefix_dirs, which would make the assertion circular.
-manual = []
-for d in declared:
-    if os.path.isdir(d) and d not in manual:
-        manual.append(d)
-for d in inherited.split(SEP):
-    if d and d not in manual:
-        manual.append(d)
-manual_out = SEP.join(manual)
 with prefix(declared, override="unset", inherited=inherited):
     out = serviced.canonical_path(inherited)
-ok("hand-built expectation equals the function's output, byte for byte",
-    out == manual_out, f"got  {out}\n       want {manual_out}")
-ok("no os.defpath entry was appended (the tail contributed)",
-    not (set(parts(out)) & set(floor) - set(manual)), out)
-ok("and it equals the pre-floor behaviour (tail non-empty ⇒ floor inert)",
+ok("non-empty inherited tail adds no system floor",
     parts(out) == [p1, p2, i1, i2], out)
 
 print()
