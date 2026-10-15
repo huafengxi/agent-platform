@@ -12,6 +12,8 @@ anchors:
 
 `agents/` 运行时树的跨机同步链路：星型拓扑，hub = 中立目录 `dev:/data/shared/agents`（零原件），dev/nv1/nv2/mac 四机对等。服务名 `agents-sync`（`make agents-sync.start/.stop/.status`），常驻监督壳 = `loop.sh`，传输契约权威 = `ssh-sync.py` docstring + `@agentd#sync-channel`。
 
+删除清单的路径、受保护资产与强制标记契约归 `delete_contract.py`；生成端与同步消费端引用同一实现。清理豁免族政策由生成端执行。
+
 ## 是什么
 
 | 脚本 | 作用 |

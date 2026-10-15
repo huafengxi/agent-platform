@@ -156,22 +156,19 @@ check("accept a concrete queue/ participant subtree (clan is deletable)",
 check("accept agent/ subtree (clan dropped from exemption)",
       gc.sanitize_entry("agent/dispatcher/") == "agent/dispatcher/")
 
-print("== ssh-sync.py 的镜像副本与 gc.py 同值（手工镜像、不可 import）==")
-# ssh-sync.py 必须自带两份副本（作为脚本时 sys.path[0] = agents-sync/，
-# `import gc` 会遮蔽标准库同名模块）⇒ 副本靠本断言钉同值：只改一侧 =
-# 消费端（删除发生的那一侧）护栅与 hub 侧不一致。
+print("== producer and consumer share one deletion contract ==")
 import importlib.util as _ilu
 _ss_spec = _ilu.spec_from_file_location(
-    "ssh_sync_mirror_pin", os.path.join(os.path.dirname(gc.__file__), "ssh-sync.py"))
+    "ssh_sync_shared_contract", os.path.join(os.path.dirname(gc.__file__), "ssh-sync.py"))
 _ss = _ilu.module_from_spec(_ss_spec)
 _ss_spec.loader.exec_module(_ss)
-check("GC_BARE_FAMILY_ENTRIES mirror == gc.BARE_FAMILY_ENTRIES",
-      _ss.GC_BARE_FAMILY_ENTRIES == gc.BARE_FAMILY_ENTRIES,
+check("shared BARE_FAMILY_ENTRIES identity",
+      _ss.GC_BARE_FAMILY_ENTRIES is gc.BARE_FAMILY_ENTRIES,
       "%r vs %r" % (_ss.GC_BARE_FAMILY_ENTRIES, gc.BARE_FAMILY_ENTRIES))
-check("GC_PROTECTED_PATHS mirror == gc.PROTECTED_SYSTEM_PATHS",
-      _ss.GC_PROTECTED_PATHS == gc.PROTECTED_SYSTEM_PATHS,
+check("shared PROTECTED_SYSTEM_PATHS identity",
+      _ss.GC_PROTECTED_PATHS is gc.PROTECTED_SYSTEM_PATHS,
       "%r vs %r" % (_ss.GC_PROTECTED_PATHS, gc.PROTECTED_SYSTEM_PATHS))
-check("mirror covers the queue/ clan container too",
+check("shared contract covers the queue/ clan container",
       _ss.GC_BARE_FAMILY_ENTRIES.count("queue") == 1)
 
 print("== add: list creation, cumulativity, compression ==")

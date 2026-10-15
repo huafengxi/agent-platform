@@ -174,11 +174,13 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from platform_paths import workspace_root
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from delete_contract import (GC_DIR_NAME, LIST_PREFIX, GLOB_UNSAFE,
+                             BARE_FAMILY_ENTRIES, PROTECTED_SYSTEM_PATHS,
+                             FORCE_MARK, split_force, validate_path as validate_delete_path)
 
 _WORKSPACE = workspace_root(__file__)
 
-GC_DIR_NAME = "gc"
-LIST_PREFIX = "delete-list."
 STATE_REL = os.path.join("run", "gc", "state.json")
 
 DEFAULT_DELAY = 300.0  # seconds; see module docstring for rationale
@@ -193,39 +195,8 @@ DEFAULT_DELAY = 300.0  # seconds; see module docstring for rationale
 # future cleanup-exempt clan (with the audited --force bypass below).
 # This exemption class is enforced HUB-SIDE ONLY (the consumer trusts
 # the list for it). Critical single assets stay protected via
-# PROTECTED_SYSTEM_PATHS — that class IS mirrored on the consumer.
+# PROTECTED_SYSTEM_PATHS from the shared deletion contract.
 FORBIDDEN_LAYOUT_DIRS = ()
-
-# System-asset preserve list: the dispatcher position mailbox — the
-# reaper fallback target for every task in the system (runner terminal
-# notifications + child ask_dispatcher + human/service inform write
-# entry). Both of its carrier addresses are listed (the same mailbox
-# has a landing point in two families): losing either loses task
-# notifications, and the fallback face must be writable
-# unconditionally. Semantics = DEFAULT-REFUSAL class (accident guard):
-# refused at any depth without the marker; the audited --force bypass
-# lifts it (2026-10-04 user decision). Force-deleting a tombstone
-# carrier's precondition belongs to the authorizer: no frozen node may
-# still run pre-migration code (its send-side ensure-inbox would
-# resurrect the mailbox and the mesh would push it back).
-# Paths are relative to agents/,
-# prefix-matched on path elements ("topic/dispatcher" also protects
-# "topic/dispatcher/inbox/x.msg").
-# Cross-reference: the agentd side keeps the same list as
-# proto.PROTECTED_SYSTEM_TOPICS / proto.PROTECTED_SYSTEM_PATHS (single source for
-# report.py's system-topic exemption). This module stays stdlib-only on purpose
-# (hub-side script, no repo imports), so the two copies are pinned equal by an
-# e2e assertion (agentd/e2e.py S41) — adding a new system topic on only one side
-# turns that check red.
-#
-# Live daemon bots are DELIBERATELY NOT listed here: their names live in the
-# declaration face bots/daemon/, and hard-coding them into this tuple would
-# create a second roster to keep in sync by hand (this comment used to carry
-# such an example roster and drifted the moment a bot was retired). Their deletion guard is behavioural (cleanup tasks
-# skip bot/ by default; deleting a bot needs explicit user authorisation) plus
-# the auditable delete-list ledger. Ruling + re-open triggers:
-# the workspace decision log.
-PROTECTED_SYSTEM_PATHS = ("topic/dispatcher", "queue/dispatcher")
 
 # Hub neutral directory: the authoritative
 # agents/ tree moved out of the participant workspace to this neutral
@@ -233,37 +204,6 @@ PROTECTED_SYSTEM_PATHS = ("topic/dispatcher", "queue/dispatcher")
 # resolution when present; GC_AGENTS_DIR / explicit GC_WORKSPACE win.
 NEUTRAL_HUB_DIR = "/data/shared/agents"
 
-# Same defense as ssh-sync's protect lists: exclude-pattern semantics
-# are globs; newline would split an entry.
-GLOB_UNSAFE = set("*?[\n")
-
-# Bare family containers: the four layout clan names (same tuple as
-# agentd/proto.py LAYOUT_DIRS — this module stays stdlib-only, so the
-# names are pinned here rather than imported; the equality is asserted
-# by agentd/e2e.py S41) plus the tree-root-
-# isomorphic ``agents`` and the workspace-level container name ``run``.
-# Such an entry names NO participant, so a single line would delete an
-# entire clan (or, for a same-named subtree under the tree, the whole
-# tree). A deletion must name a concrete participant directory
-# (``task/<id>/``, ``bot/<name>/``, ``topic/<id>/``, ``queue/<name>/``). Structural guard:
-# enforced at all three points (add / read-compression / delete) and
-# NOT liftable by the audited --force bypass. Only the BARE depth-1
-# container is refused — every path below it stays deletable, including
-# pre-layout flat directories.
-#
-# Those depth-1 legacy entries (first segment is not a family container:
-# pre-layout flat task dirs, participant/, ticket/, ...) stay LEGAL by design.
-# Requiring two path segments would turn the existing stock into paths this
-# channel can no longer delete (hand-rm only, against the deletion-channel
-# iron rule) for the sole gain of a tidier ledger. Ruling + re-open triggers:
-# the workspace decision log.
-BARE_FAMILY_ENTRIES = ("agents", "task", "bot", "topic", "queue", "run")
-
-# Audited force bypass (2026-08-31 user decision): the
-# inline marker that ``add --force`` appends to cleanup-exempt entries
-# so the delete-list ledger records WHO forced WHAT WHEN. Duplicated
-# verbatim in ssh-sync.py (consumer strips it to get the path).
-FORCE_MARK = " #FORCED:"
 # Audit field values must stay in this alphabet (no spaces, no '/';
 # the entry must stay one line and one rsync-safe path).
 _FORCE_AUDIT_SAFE = re.compile(r"^[A-Za-z0-9._:@+=,-]+$")
@@ -271,17 +211,6 @@ _FORCE_AUDIT_SAFE = re.compile(r"^[A-Za-z0-9._:@+=,-]+$")
 
 class GcError(Exception):
     pass
-
-
-def split_force(e):
-    """Split an entry into (path, audit-or-None) at the FORCE_MARK
-    marker. Entries without the marker return
-    (e, None). Only ``add --force`` writes marked entries; read /
-    compression / reap pass them through."""
-    i = e.find(FORCE_MARK)
-    if i < 0:
-        return e, None
-    return e[:i], e[i + len(FORCE_MARK):]
 
 
 def validate_entry(e):
@@ -303,45 +232,15 @@ def validate_entry(e):
 
 
 def validate_path(e, force=False):
-    """Core structural validation of one entry PATH (no marker).
-    ``force=True`` lifts the PERMISSION classes (FORBIDDEN_LAYOUT_DIRS
-    and PROTECTED_SYSTEM_PATHS); shape guards stay."""
-    if not e or e != e.strip():
-        return "empty or unstripped entry"
-    if e.startswith("/"):
-        return "absolute paths are not allowed"
-    if any(c in GLOB_UNSAFE for c in e):
-        return "glob-unsafe characters are not allowed"
-    raw = e.rstrip("/")
-    is_dir = e.endswith("/")
-    if not raw or raw == ".":
-        return "refusing the tree root"
-    parts = raw.split("/")
-    if any(p in ("", "..") for p in parts):
-        return "empty or '..' path elements are not allowed"
-    if len(parts) == 1 and parts[0] in BARE_FAMILY_ENTRIES:
-        return (f"{parts[0]}/ is a BARE FAMILY CONTAINER — it names no "
-                "participant; a deletion must name a concrete participant "
-                "directory (task/<id>/, bot/<name>/, topic/<id>/, queue/<name>/). "
-                "Refused even with --force; un-refuse = edit "
-                "BARE_FAMILY_ENTRIES in agents-sync/gc.py")
-    if not force:
-        for prot in PROTECTED_SYSTEM_PATHS:
-            pp = prot.strip("/").split("/")
-            if parts[:len(pp)] == pp:
-                return (f"{prot}/ is a PROTECTED system asset (dispatcher "
-                        "position mailbox) — deletion refused by default; "
-                        "audited bypass: add --force")
-    top = parts[0]
+    """Validate the shared wire shape, then the hub-only layout policy."""
+    why = validate_delete_path(e, force=force)
+    if why:
+        return why
+    top = e.split("/", 1)[0]
     if top in FORBIDDEN_LAYOUT_DIRS and not force:
         return (f"the {top}/ layout subtree is NEVER deletable "
                 "(iron rule, cleanup-exemption law; audited bypass: "
                 "add --force)")
-    if top == GC_DIR_NAME:
-        if len(parts) == 2 and parts[1].startswith(LIST_PREFIX) \
-                and not is_dir:
-            return None  # list compression entry: legal
-        return f"the {GC_DIR_NAME}/ tree is managed by gc.py itself"
     return None
 
 
