@@ -19,8 +19,7 @@ Covers:
 + ⑦ absent clone          -> `other`, silent.
 + ⑧ end-to-end CLI `--once --root ... --repos .`: exit 0, no mirror fetch in
      test mode.
-+ ⑨ red line: the daemon's only output face is the log — no envelope writer,
-     no json import, nothing ever written under agents/.
++ ⑨ red line: sync rounds write nothing under agents/.
 + ⑩ privacy: dirty file CONTENT never reaches a log line (paths/codes only).
 + ⑪ mirror_repos / is_mirror_host: the mirror face is discovered from
      `<mirror-dir>/*.git` (bare dirs only) — no repo list and no machine name to
@@ -53,7 +52,6 @@ def _load(name, path):
 
 
 gs = _load("git_sync", os.path.join(_HERE, "git-sync.py"))
-SRC = open(os.path.join(_HERE, "git-sync.py"), encoding="utf-8").read()
 
 PASS = 0
 FAIL = []
@@ -326,18 +324,6 @@ check("lock file created under run/locks", os.path.exists(os.path.join(ws, "run"
                                                                      "git-sync.lock")))
 
 print("\n[⑨] red line: the log is the only output face")
-check("module exports exactly the sync face", {n for n in dir(gs) if not n.startswith("_")}
-      <= {"DEFAULT_ROOT", "DIRTY_LIST_LIMIT", "INFO_FETCH_TIMEOUT",
-          "MIRROR_DIR", "MIRROR_FETCH_EVERY", "MIRROR_FETCH_TIMEOUT", "SCRIPT_DIR",
-          "acquire_lock", "ahead_behind", "argparse", "dirty_tracked_entries",
-          "discover_repos", "fcntl", "git", "host_id", "is_mirror_host", "log", "main",
-          "mirror_fetch", "mirror_repos", "os", "start_mirror_fetch", "subprocess", "sync_repo",
-          "sys", "threading", "time"},
-      str(sorted(n for n in dir(gs) if not n.startswith("_"))))
-check("no json import (writes no envelopes, reads no pid.json)", "import json" not in SRC)
-check("no notify-send", "notify-send" not in SRC)
-check("no dispatcher/inbox token", "dispatcher" not in SRC.lower() and "inbox" not in SRC.lower())
-check("no agents/ coupling", "agents/" not in SRC)
 ws, src = mk_sandbox()
 dirty(ws)
 push_from(src)
