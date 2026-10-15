@@ -212,8 +212,10 @@ import stat as statmod
 import sys
 
 REPLICA_GROUP = "replica"
-_WORKSPACE = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from platform_paths import workspace_root
+
+_WORKSPACE = workspace_root(__file__)
 # Hub = the machine hosting the neutral hub directory
 # dev:/data/shared/agents (agents-sync/loop.sh REMOTE), the
 # dispatcher/resident sessions, the IM bridge sessions and the single

@@ -75,8 +75,11 @@ import sys
 import threading
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from platform_paths import workspace_root
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_ROOT = os.path.dirname(SCRIPT_DIR)  # the ~/m workspace
+DEFAULT_ROOT = workspace_root(__file__)
 
 # mirror hub: fetch half of the workspace's mirror reconciliation
 # (push-back = the mirrors' post-receive hook)

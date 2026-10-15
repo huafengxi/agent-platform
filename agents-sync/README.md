@@ -8,6 +8,8 @@ anchors:
 
 # agents-sync/ — agents/ 跨机同步（rsync over ssh）
 
+平台仓入口与统一安装契约见 [agent-platform](../README.md)。
+
 `agents/` 运行时树的跨机同步链路：星型拓扑，hub = 中立目录 `dev:/data/shared/agents`（零原件），dev/nv1/nv2/mac 四机对等。服务名 `agents-sync`（`make agents-sync.start/.stop/.status`），常驻监督壳 = `loop.sh`，传输契约权威 = `ssh-sync.py` docstring + `@agentd#sync-channel`。
 
 ## 是什么

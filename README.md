@@ -29,4 +29,8 @@ python3 install.py --workspace /path/to/workspace
 
 ## 验证
 
-`python3 test_platform_paths.py` 验证安装与根路径契约。组件回归入口见各模块 README；依赖调用方角色资产的会话测试须由调用方提供工作区。测试只写临时沙箱。
+```bash
+python3 test.py --workspace /path/to/workspace --integration
+```
+
+统一入口运行安装契约、六模块回归及可选端到端场景，失败返回非零；`--module` 可选单模块。测试只写临时沙箱。调用方提供角色、扩展与解密器资产；各模块的单独回归入口仍见其 README。

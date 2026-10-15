@@ -172,8 +172,10 @@ import sys
 import tempfile
 import time
 
-_WORKSPACE = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from platform_paths import workspace_root
+
+_WORKSPACE = workspace_root(__file__)
 
 GC_DIR_NAME = "gc"
 LIST_PREFIX = "delete-list."

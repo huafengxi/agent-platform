@@ -61,7 +61,8 @@
 # **本文件的 while 循环必须是最后一个构造**：bash 边读边执行，运行中改本文件会让
 # 续读位置错位；将来在 `done` 之后追加内容 ∨ 给循环加 `break`，都必须伴随重启。
 
-WS="$(cd "$(dirname "$0")/.." && pwd)"
+MODULE_DIR="$(cd "$(dirname "$0")" && pwd -P)" || exit 1
+WS="$(python3 "${MODULE_DIR}/../platform_paths.py" "$0")" || exit 1
 SYNC="$WS/agents-sync/ssh-sync.py"
 LOG="$WS/run/logs/agents-sync.log"
 mkdir -p "$WS/run/logs"
