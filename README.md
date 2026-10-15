@@ -8,7 +8,7 @@ anchors:
 
 # agents-sync/ — agents/ 跨机同步（rsync over ssh）
 
-`agents/` 运行时树的跨机同步链路：星型拓扑，hub = 中立目录 `dev:/data/shared/agents`（零原件），dev/nv1/nv2/mac 四机对等。服务名 `agents-sync`（`make agents-sync.start/.stop/.status`），常驻监督壳 = `loop.sh`，传输契约权威 = `ssh-sync.py` docstring + `@agentd#sync-channel`。（云端存储同步 PikPak/WebDAV 是另一回事，在 `dsync/` 子仓。）
+`agents/` 运行时树的跨机同步链路：星型拓扑，hub = 中立目录 `dev:/data/shared/agents`（零原件），dev/nv1/nv2/mac 四机对等。服务名 `agents-sync`（`make agents-sync.start/.stop/.status`），常驻监督壳 = `loop.sh`，传输契约权威 = `ssh-sync.py` docstring + `@agentd#sync-channel`。
 
 ## 是什么
 
@@ -81,4 +81,3 @@ make agents-sync.start/.stop/.status                # 本机 agents/ 跨机同�
 
 - 部署面（服务定义、拓扑、属组闸门接入流程）：工作区的 `services/profiles/agents-sync.json` + 各机 `services/daemons/<机>.agents-sync.json`、`loop.sh`、`bootstrap/SETUP.md` §8
 - 传输契约与文件协议：`@agentd#sync-channel`、`agentd/agent-file-protocol.md`
-- 云端存储同步（PikPak / WebDAV）：`dsync/` 子仓
