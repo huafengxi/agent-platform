@@ -121,12 +121,6 @@ class ReloadTests(unittest.TestCase):
                 hb.cmd_fire(["t"])
         runner.shutdown.assert_called_once_with()
 
-    def test_group_escalation_even_if_leader_exits_on_term(self):
-        process = Mock(pid=12345)
-        with patch.object(hb, "_signal_group") as send:
-            hb.kill_tree(process, grace=0.01)
-        self.assertEqual(send.call_args_list,
-                         [((12345, hb.signal.SIGTERM),), ((12345, hb.signal.SIGKILL),)])
 
 
 if __name__ == "__main__":

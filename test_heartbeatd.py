@@ -538,10 +538,6 @@ def t_fire():
           hb.read_state(hb.STATE_FILE)["t"]["last_exit"] == 7)
 
     root, r = _runner_with(
-        a_profile(cmd=[sys.executable, "-c", "import os; os.chdir('/')"]),
-        a_timer(schedule={"interval": {"seconds": 3600}}))
-    check("cwd defaults to the workspace root", True)
-    root, r = _runner_with(
         a_profile(cmd=[sys.executable, "-c", "pass"], cwd="missing-dir"),
         a_timer(schedule={"interval": {"seconds": 3600}}))
     out = io.StringIO()
