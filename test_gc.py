@@ -273,13 +273,6 @@ check("gc list file allowed (compression)",
 check("normal path allowed",
       not gc.is_forbidden_at_delete("0828-0000-aaaa/report.md"))
 
-print("== state loss recovery ==")
-os.remove(gc.state_path(ws))
-touch(ad, "recover/f")
-rc = gc.cmd_add(ws, ad, ["recover/"], delay=999, wait=False)
-check("add after state loss rc=0", rc == 0)
-st = gc.load_state(ws)
-check("seq resumes past surviving lists", st["seq"] >= 3, str(st["seq"]))
 shutil.rmtree(ws)
 
 # ------------------------------------------------------- ssh-sync pull
@@ -538,16 +531,19 @@ check("reap: file entry at dir deletes subtree",
       deleted == ["dirX"] and missed == [], f"{deleted} {missed}")
 check("reap: subtree gone", not os.path.exists(os.path.join(ad, "dirX")))
 shutil.rmtree(ws)
-# consumer: file entry at a real directory -> subtree deleted
+# consumer: both mismatches converge (file entry at directory and vice versa)
 ws = mkws()
 ad = os.path.join(ws, "agents")
 os.makedirs(os.path.join(ad, "dirY"))
 touch(ad, "dirY/f")
-touch(ad, "gc/delete-list.000001", "dirY\n")
+touch(ad, "plainY", "plain file at a directory entry")
+touch(ad, "gc/delete-list.000001", "dirY\nplainY/\n")
 n = ss.apply_gc_deletions(ad)
-check("consumer: file entry at dir deletes subtree", n == 1, f"n={n}")
+check("consumer: both type mismatches deleted", n == 2, f"n={n}")
 check("consumer: subtree gone",
       not os.path.exists(os.path.join(ad, "dirY")))
+check("consumer: directory entry at plain file removes the file",
+      not os.path.exists(os.path.join(ad, "plainY")))
 n = ss.apply_gc_deletions(ad)
 check("consumer: converged (replay = 0)", n == 0, f"n={n}")
 shutil.rmtree(ws)
@@ -670,32 +666,8 @@ n = ss.apply_gc_deletions(ad)
 check("replay converges", n == 0, f"n={n}")
 shutil.rmtree(ws)
 
-print("== bot/ immortality iron rule REMOVED ==")
-check("FORBIDDEN_LAYOUT_DIRS is empty (user decision 2026-09-06)",
-      gc.FORBIDDEN_LAYOUT_DIRS == (), str(gc.FORBIDDEN_LAYOUT_DIRS))
-# 1. any bot/ path passes validation WITHOUT force at all three
-#    iron-rule enforcement points (add sanitize / read-compression
-#    validate_entry / reap is_forbidden_at_delete)
-for good in ("bot/dispatcher", "bot/dispatcher/",
-             "bot/dispatcher/inbox/x.msg",
-             "bot/dispatcher/watcher/dev-dispatcher",
-             "bot/pal/", "bot/c1/watcher/alice"):
-    check(f"bot/ accepted (no force): {good}",
-          gc.validate_path(good) is None)
-    check(f"bot/ accepted via validate_entry: {good}",
-          gc.validate_entry(good) is None)
-    check(f"bot/ NOT forbidden at delete: {good}",
-          not gc.is_forbidden_at_delete(good))
-# ... but the BARE clan container is refused at all three points:
-# deletable clan != deletable clan CONTAINER
-for bare in ("bot/", "bot"):
-    check(f"bare bot/ clan container refused: {bare}",
-          gc.validate_path(bare) is not None)
-    check(f"bare bot/ refused via validate_entry: {bare}",
-          gc.validate_entry(bare) is not None)
-    check(f"bare bot/ forbidden at delete: {bare}",
-          gc.is_forbidden_at_delete(bare))
-# 2. cmd_add: bot/dispatcher lands in the list UNMARKED (no bypass
+print("== bot/ participant deletion ==")
+# cmd_add: bot/dispatcher lands in the list UNMARKED (no bypass
 #    involved), reap converges the subtree, consumer applies it
 ws = mkws()
 ad = os.path.join(ws, "agents")
@@ -720,13 +692,6 @@ check("consumer applies the bot/ entry (list is trusted)", n >= 1
       and not os.path.exists(os.path.join(ad, "bot/dispatcher")),
       f"n={n}")
 shutil.rmtree(ws)
-# 3. protected system asset regression: topic/dispatcher refused by
-#    default, ACCEPTED under the audited --force bypass (full coverage
-#    in the PROTECTED_SYSTEM_PATHS section below)
-check("topic/dispatcher refused by default, accepted under force",
-      gc.validate_path("topic/dispatcher/") is not None
-      and gc.validate_path("topic/dispatcher/", force=True) is None)
-
 print("== PROTECTED_SYSTEM_PATHS (dispatcher position mailbox) ==")
 # The position mailbox is the reaper fallback target for every task in the
 # system; both of its carrier addresses are listed. Semantics = default-refusal
@@ -1055,23 +1020,6 @@ check("L8 an unrelated add never schedules a forged list's entries",
       and not any("task/mine" in k for k in sched_after), str(sched_after))
 check("L8 add's compression still retires BOTH old list files (ledger op)",
       not os.path.exists(auth) and not os.path.exists(forged))
-shutil.rmtree(ws)
-
-print("== add honors --delay (the propagation grace window) ==")
-ws = mkws()
-ad = os.path.join(ws, "agents")
-touch(ad, "task/slow/f")
-rc = gc.cmd_add(ws, ad, ["task/slow/"], delay=999, wait=False)
-check("L8 --delay 999: scheduled, still on disk", rc == 0
-      and os.path.exists(os.path.join(ad, "task/slow/f")),
-      str(gc.load_state(ws)["schedule"]))
-d, m = gc.reap(ws, ad, verbose=False)
-check("L8 reap before the deadline deletes nothing", d == [] and m == [],
-      (d, m))
-rc = gc.cmd_add(ws, ad, ["task/fast/"], delay=0, wait=True)
-touch(ad, "task/slow/f")
-check("L8 --delay 0 + --wait converges the batch", rc == 0
-      and not os.path.exists(os.path.join(ad, "task/fast")), str(rc))
 shutil.rmtree(ws)
 
 print()

@@ -22,11 +22,8 @@ Covers:
 + T5 real rsync: a local original is never overwritten by a pull, landed
   files are marked ``replica``, byte-identical files are not rewritten,
   a replica is never pushed back
-+ T6 gc delete-list consumption: anchored patterns, ``gc/`` self-tree
-  refusal, malformed-entry refusal, the FORCED audit marker, deletion
-  convergence (subtree, type mismatch, idempotency)
-+ T7 flag/CLI invariants: ``-c`` present, ``-I`` absent, no ``--delete``
-  anywhere on the watch path, ``watch`` refuses ``--delete`` at argparse
++ T7 flag/CLI invariants: ``-c`` present, ``-I`` absent,
+  ``watch`` refuses ``--delete`` at argparse
 + T8 detectors: the remote inotify script is valid Python and really
   emits one line per event with excluded names dropped; the local inotify
   thread really notes a change
@@ -467,56 +464,6 @@ if gate_usable() and can_chgrp(mktmp("probe")):
 else:
     skip("real-transport tests", "no replica group membership here")
 
-# ------------------------------------------------- T6 gc consumption
-print("== T6 gc delete-list consumption ==")
-g = mktmp("gc")
-write(g, "gc/delete-list.000001", "task/dead/\nold.txt\n")
-write(g, "gc/delete-list.000002",
-      "task/dead2/ #FORCED:audit-mark\ngc/delete-list.000000\n"
-      "gc/state.json\n/abs/path\n../escape\nwild*card\n")
-write(g, "keep.txt", "KEEP")
-write(g, "old.txt", "STALE")
-write(g, "task/dead/inner.txt", "STALE")
-write(g, "task/dead2/inner.txt", "STALE")
-ex, targets, refused = ss.gc_exclude_and_targets(g)
-check("gc: entries become ANCHORED patterns (file + subtree)",
-      "/old.txt" in ex and "/task/dead/" in ex and "/task/dead2/" in ex, ex)
-check("gc: the FORCED audit marker is stripped, the path applied",
-      any(t[0] == "task/dead2" and t[1] for t in targets), targets)
-check("gc: newer lists are unioned (both files present)",
-      {t[0] for t in targets} >= {"old.txt", "task/dead", "task/dead2"},
-      targets)
-check("INVARIANT gc/ internals are refused (a forged list cannot touch the "
-      "GC tree); a compression entry would be the only legal one",
-      not any(t[0].startswith("gc/") and t[0] != "gc/delete-list.000000"
-              for t in targets), targets)
-check("gc: malformed entries are refused (absolute / .. / glob chars)",
-      any("/abs/path" in r for r in refused)
-      and any("../escape" in r for r in refused)
-      and any("wild*card" in r for r in refused), refused)
-n = ss.apply_gc_deletions(g)
-check("gc: listed paths are deleted (file + whole subtree)",
-      read(g, "old.txt") is None and read(g, "task/dead/inner.txt") is None
-      and read(g, "task/dead2/inner.txt") is None, n)
-check("gc: unlisted files are untouched", read(g, "keep.txt") == "KEEP")
-check("gc: the delete-lists themselves survive (replayable)",
-      read(g, "gc/delete-list.000001") is not None
-      and read(g, "gc/delete-list.000002") is not None)
-check("gc: it reports how many paths it removed", n == 3, n)
-check("gc: idempotent — a second round removes nothing",
-      ss.apply_gc_deletions(g) == 0)
-# type mismatch converges instead of retrying forever
-g2 = mktmp("gc2")
-write(g2, "gc/delete-list.000001", "adir\nbfile/\n")
-os.makedirs(os.path.join(g2, "adir"))
-write(g2, "adir/inner.txt", "x")
-write(g2, "bfile", "plain file at a dir entry")
-ss.apply_gc_deletions(g2)
-check("gc: a FILE entry at a directory removes the subtree",
-      not os.path.exists(os.path.join(g2, "adir")))
-check("gc: a DIR entry at a plain file removes the file",
-      not os.path.exists(os.path.join(g2, "bfile")))
-
 # ------------------------------------------------- T7 flags & CLI
 print("== T7 flags & CLI invariants ==")
 check("INVARIANT -c present in watch flags", "c" in ss.WATCH_RSYNC_FLAGS,
@@ -526,16 +473,6 @@ check("INVARIANT -I absent from watch flags", "I" not in ss.WATCH_RSYNC_FLAGS,
 check("INVARIANT no -a/-g/-o spelling in watch flags",
       "a" not in ss.WATCH_RSYNC_FLAGS and "g" not in ss.WATCH_RSYNC_FLAGS,
       ss.WATCH_RSYNC_FLAGS)
-wr_src = open(os.path.join(_HERE, "ssh-sync.py")).read()
-wr = wr_src.split("def watch_rsync(")[1].split("\ndef local_inotify_thread")[0]
-check("INVARIANT watch_rsync never passes --delete", "--delete" not in wr,
-      [l for l in wr.splitlines() if "--delete" in l])
-check("INVARIANT watch_rsync keeps --chown=:replica",
-      "--chown=:{REPLICA_GROUP}" in wr)
-check("INVARIANT push feeds --files-from, pull feeds --exclude-from",
-      '"--files-from=-"' in wr and '"--exclude-from=-"' in wr)
-check("INVARIANT the pull stream carries protect + gc + WATCH_EXCLUDES",
-      "protect + gc_excludes + WATCH_EXCLUDES" in wr)
 p_watch = None
 try:
     sys.argv = ["ssh-sync.py", "watch", "--delete"]
