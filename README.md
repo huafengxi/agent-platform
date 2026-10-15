@@ -211,4 +211,4 @@ works when both repos sit in the same parent directory).
 | `persona.py` | persona assembly (resolution layer): profile/capabilities → structured injection face; also a CLI for out-of-process consumers (the injection extension) |
 | `fakepi_rpc.py` | scriptable `pi --mode rpc` double for the tests |
 | `test_persona.py` | resolution-layer matrix (P1…P16: output contract, capability expansion, fallback, tool sets, bundles, model/provider, compaction policy, knowledge tiers against the real `kb_index.py`, warnings, CLI) |
-| `test_wrap.py` | the verification matrix (T1…T48: argv/env, handshake, convergence, exit-code semantics, persona emission contract, cross-file pins) |
+| `test_wrap.py` | the verification matrix (argv/env, handshake, convergence, exit-code semantics, persona emission contract, stderr streaming) |

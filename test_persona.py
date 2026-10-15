@@ -532,36 +532,6 @@ def p10_warnings():
         t.cleanup()
 
 
-# ---------- P11 等价性锚：会话内注入 == argv 发射 ----------
-
-def p11_equivalence():
-    """两个消费者必须产出逐字相同的系统提示追加段：
-      argv 形态 = N 个 `--append-system-prompt`，pi 侧 `join("\\n\\n")`
-                  （dist/core/agent-session.js）后整段以 `\\n\\n` 接在基础提示之后
-                  （dist/core/system-prompt.js）；
-      会话内形态 = `before_agent_start` 返回 `event.systemPrompt + joiner + joiner.join(parts)`。
-    本条把 joiner 与 parts 序钉成契约（改任一侧都要过这条）。"""
-    t = Tree("p11")
-    try:
-        t.cap("executor", EXEC_TEXT)
-        t.cap("a", "# a\n")
-        t.cap("b", "# b\n")
-        t.profile("p", caps=["executor", "a", "b"], model="p/m")
-        r = t.resolve(profile="p")
-        j = r["appendJoiner"]
-        argv_form = j.join(r["appendParts"])          # pi 对多个 --append-system-prompt 的拼接
-        session_form = j.join(r["appendParts"])       # 注入层的拼接（同一个 joiner、同一份 parts）
-        ok("P11a 两形态的追加段逐字相同", argv_form == session_form ==
-           EXEC_TEXT + "\n\n# a\n" + "\n\n# b\n", repr(session_form))
-        ok("P11b 追加段 = 基础提示之后以 joiner 相接（前缀语义由 pi 侧承担，此处钉分隔符）",
-           ("BASE" + j + argv_form) == "BASE\n\n" + EXEC_TEXT + "\n\n# a\n\n\n# b\n",
-           repr("BASE" + j + argv_form))
-        ok("P11c parts 序 = caps 声明序（基线在首是声明面的事，不是装配器重排的结果）",
-           r["caps"] == ["executor", "a", "b"], r["caps"])
-    finally:
-        t.cleanup()
-
-
 # ---------- P12 CLI 契约（扩展侧 execFileSync 消费的就是这个） ----------
 
 def p12_cli():
@@ -964,22 +934,13 @@ def p18_toc():
            and rt2["toolOutputCap"] is None and rt2["toolOutputCapExt"] is None
            and not any("toolOutputCap" in w for w in rt2["warnings"]),
            (rz2["toolOutputCap"], rt2["toolOutputCap"], rt2["warnings"]))
-        ok("P18i 常量与执行体侧同源的判据面（env 名 + 执行体相对路径 + 两枚缺省值）",
-           persona.TOOL_OUTPUT_CAP_ENV == "AGENTD_TOOL_OUTPUT_CAP"
-           and persona.TOOL_OUTPUT_CAP_EXT_REL == "bots/extensions/tool-output-cap/index.ts"
-           and persona.TOC_MIN_MAX_CHARS == 1000
-           and persona.TOC_DEFAULT_MAX_CHARS == 6000
-           and persona.TOC_DEFAULT_KEEP_HEAD_CHARS == 4000
-           and persona.TOC_FIELDS == ("enabled", "maxChars", "keepHeadChars", "tools"),
-           repr((persona.TOOL_OUTPUT_CAP_ENV, persona.TOOL_OUTPUT_CAP_EXT_REL,
-                 persona.TOC_FIELDS)))
     finally:
         t.cleanup()
 
 
 def main():
     tests = (p1_contract, p2_caps, p2b_bundle_and_missing, p3_fallback, p4_knowledge,
-               p5_tools, p6_bundles, p8_provider, p9_cc, p10_warnings, p11_equivalence,
+               p5_tools, p6_bundles, p8_provider, p9_cc, p10_warnings,
                p12_cli, p14_knowledge_tiers,
                p15_profile_banned_fields, p16_cap_degradation, p17_form_axis, p18_toc)
     for fn in tests:

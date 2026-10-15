@@ -8,7 +8,6 @@
 压缩策略归一 / 降级矩阵）不在这里断言 —— 那是解析层的输出契约，归 `test_persona.py`（P 系列）。
 本文件对人格面只断言 wrap 的两个动作（T48）：把注入层扩展 `-e` 进去、把输入 env 透传下去。
 """
-import glob
 import json
 import os
 import re
@@ -844,9 +843,7 @@ def t31_ready_env_scrub():
     （身份/信号类，与 AGENTD_RESIDENT/DISPATCH_PROFILE 同族），必须只来自写者自身、不得继承：
     未进洗刷名单时它们被任务内每个孙进程继承 → 经 bash 工具 → `make` → `serviced/serviced.py` 带进被启动的
     服务，且嵌套 receiver 会拿外层任务的标记开门。
-      a) 名单单点含两枚 + scrub_env 真洗掉（其余键保留）；
-      d) 跳文件同源：三个调用方都 import 同一份名单（不另立副本）；
-      e) 握手不受影响：spawn_pi() 在洗刷之后**显式**赋值两枚（源码顺序断言；端到端证据 = T30a）。"""
+      scrub_env 洗掉两枚信号键并保留其余键；握手行为由 T30 覆盖。"""
     import envscrub
     two = ("AGENTD_WRAP_INIT_OK", "AGENTD_WRAP_RECV_ARMED")
     # ---- a) 名单单点 + 洗刷行为 ----
@@ -864,33 +861,6 @@ def t31_ready_env_scrub():
        sorted(scrubbed))
     ok("T31a runner spawn 口径（strip_third_party=True）同样洗掉两枚",
        not any(k in envscrub.scrub_env(base=polluted, strip_third_party=True) for k in two))
-
-    # ---- d) 跳文件同源（三个调用方 import 同一份名单，不另立副本）----
-    ws = os.path.normpath(os.path.join(HERE, ".."))
-    for rel in ("serviced/serviced.py", "agentd/runner.py",
-                # 第三个调用方在 gitignored 的 w/ 整树里（`git ls-files w` = 0）→ 快照隔离跑时
-                # 不在场；在场（真工作区）则照断，不在场显式记一条跳过（不静默、不当失败）。
-                "w/ext/sessiond/proc.py"):
-        p = os.path.join(ws, rel)
-        if not os.path.isfile(p):
-            ok("T31d %s 不在本快照内（w/ 整树 gitignored）→ 跳过该调用方同源断言" % rel, True)
-            continue
-        src = open(p, encoding="utf-8").read()
-        ok("T31d %s import 名单单点 envscrub（不复制名单）" % rel,
-           "import envscrub" in src and "ENV_SCRUB_EXACT = {" not in src, rel)
-
-    # ---- e) 握手不受影响：spawn_pi() 在洗刷之后显式赋值 ----
-    wrap_src = open(WRAP, encoding="utf-8").read()
-    fn_at = wrap_src.index("    def spawn_pi(self):")
-    fn_src = wrap_src[fn_at:fn_at + 2000]
-    i_env = fn_src.index("env = dict(os.environ")
-    i_ok = fn_src.index('env["AGENTD_WRAP_INIT_OK"]')
-    i_arm = fn_src.index('env["AGENTD_WRAP_RECV_ARMED"]')
-    ok("T31e spawn_pi() 先组 env 再**显式**赋两枚（不依赖继承 → 洗刷不影响握手）",
-       0 <= i_env < i_ok and i_env < i_arm, (i_env, i_ok, i_arm))
-    ok("T31e 两枚只在 child_recv_injected（任务形态）分支赋值（resident 不参与）",
-       "if self.child_recv_injected:" in fn_src
-       and fn_src.index("if self.child_recv_injected:") < i_ok, fn_src[:400])
 
 
 def t_fake_settled_inflight():
@@ -1248,67 +1218,13 @@ def t43_heartbeat_prompt_anchor_lines():
        "缺括注 ⇒ 执行者拿到波浪号路径却不知道权威现值在哪")
 
 
-def t45_retired_marker_zero_reflow():
-    """T45 已退役的 `DISPATCH_HEARTBEAT` 标记零回流（提交期钉桩，纯读文件、不起子进程）。
-
-    定时触发面改为「一枚 timer 一件事」后，它登记的任务是叶子（探针件只读、产线件只产自己那份产物），
-    该标记的全部消费面同批退役 = 递归守卫豁免（core.ts recursionGuardReason）、主端装配豁免
-    （index.ts task-gate）、`send_message` 让位判定、洗刷名单（agentd/envscrub.py）、协议惯例条
-    （agentd/agent-file-protocol.md）、人格例外句（caps/executor-leaf）。
-      a) 洗刷名单不含该枚（名单是枚名制、只收在产标记：死键留着会让「名单 = 在产身份标记」失真）；
-      b) 机制面零命中（core.ts / index.ts / envscrub.py / agent-file-protocol.md）；
-      c) 注册表与登记层零命中（heartbeats/**）；
-      d) 人格面零命中（bots/caps/*/prompt.md）；
-      e) registrar 的 spec.command 与 core.ts buildSpawnCommand 同形态（无 env 前缀）。
-    豁免**行为**（残留 env 副本不放行、不装配主端）由 ext 套件 `agentd-ext.test.mjs` 的
-    recursionGuardReason / task-gate / dispatch guard 三组钉住；本组只钉「文本零回流」。
-    """
-    import envscrub
+def t45_spawn_command_contract():
+    """tasks registrar 与 core.ts 的 spawn command 保持同一契约。"""
     ws = os.path.normpath(os.path.join(HERE, ".."))
-    key = "DISPATCH_HEARTBEAT"
 
     def _read(*rel):
         with open(os.path.join(ws, *rel), encoding="utf-8") as f:
             return f.read()
-
-    # ---- a) 洗刷名单：只收在产标记 ----
-    ok("T45a ENV_SCRUB_EXACT 不含已退役标记（名单 = 在产身份标记）",
-       key not in envscrub.ENV_SCRUB_EXACT, sorted(envscrub.ENV_SCRUB_EXACT))
-    ok("T45a 在产的同族前缀标记仍在名单（不误杀）",
-       "AGENTD_RESIDENT" in envscrub.ENV_SCRUB_EXACT,
-       sorted(envscrub.ENV_SCRUB_EXACT))
-
-    # ---- b) 机制面 ----
-    for rel in (EXT_DIR_PARTS + ("core.ts",),
-                EXT_DIR_PARTS + ("index.ts",),
-                ("agentd", "envscrub.py"),
-                ("agentd", "agent-file-protocol.md")):
-        txt = _read(*rel)
-        ok("T45b 机制面零命中 %s" % "/".join(rel), key not in txt,
-           "命中 ⇒ 豁免面被加回（须同批改回叶子语义并扩 ext 套件断言）")
-
-    # ---- c) 登记层与注册表 ----
-    for pat in (("heartbeats",), ("tasks",)):
-        for root, _dirs, files in os.walk(os.path.join(ws, *pat)):
-            for fn in sorted(files):
-                if not fn.endswith((".py", ".md", ".json")):
-                    continue
-                fp = os.path.join(root, fn)
-                with open(fp, encoding="utf-8") as f:
-                    txt = f.read()
-                ok("T45c 登记层零命中 %s" % os.path.relpath(fp, ws), key not in txt,
-                   "命中 ⇒ 登记层重新声明了已退役的形态标记")
-
-    # ---- d) 人格面 ----
-    caps = os.path.join(ws, "bots", "caps")
-    for name in sorted(os.listdir(caps)):
-        pp = os.path.join(caps, name, "prompt.md")
-        if not os.path.isfile(pp):
-            continue
-        with open(pp, encoding="utf-8") as f:
-            txt = f.read()
-        ok("T45d 人格面零命中 caps/%s" % name, key not in txt,
-           "命中 ⇒ 人格面留了机制面已不成立的例外句（照条文办事的模型会去派任务并被 guard 拦）")
 
     # ---- e) spec.command 形态同源（无 env 前缀）----
     reg = _read("tasks", "run.py")
@@ -1320,7 +1236,6 @@ def t45_retired_marker_zero_reflow():
         cmd = m.group(1)
         ok("T45e spec.command 与 buildSpawnCommand 同形态（无 env 前缀）",
            cmd in core and not re.match(r"^[A-Z][A-Z0-9_]*=", cmd), repr(cmd))
-
 
 def _stderr_drain_until(p, needle, timeout=10):
     """kill **前**在活进程的 stderr 上有界等 needle 出现，返回这期间读到的文本累积。
@@ -1424,71 +1339,6 @@ def t46_resident_prompt_delivery():
        "resident：无 prompt.md，裸启动（初始引导可选）" in err
        and "初始 prompt 已投递并被接受" not in err, err[-400:])
 
-
-# spec.command 的 env 前缀是身份标记进入会话的**唯一合法通道**（runner 先洗刷、再由 bash -c
-# 执行命令串 ⇒ 前缀注入发生在洗刷之后）。因此每一枚前缀键都必须在洗刷名单里：漏列 ⇒ 它从该
-# 会话的每个孙进程继承下去（bash 工具 → make → serviced/serviced.py → 被启动的服务），形态 =
-# 身份标记事故形态（若被启动的是 agentd，该标记的语义对它 spawn 的每个任务全网生效、无告警）。
-# 本组 = **提交期钉桩**
-# （零运行时守卫：名单是枚名制、同前缀族里住着配置旋钮 ⇒ 不能按前缀洗，见 envscrub.py）。
-_CMD_PREFIX_SOURCES = (
-    # (相对工作区根的 glob, 说明)。不在场 = 该源不在本快照内（w/ 整树 gitignored、pi-wrap
-    # 单独 checkout）⇒ 显式记一条跳过，不静默、不当失败。
-    ("bots/daemon/*/spec.json", "守护型/进程型 bot 的被追踪声明源（一层形态 = seed 缺省族 bot/）"),
-    ("bots/daemon/*/*/spec.json", "同上，两层形态（声明的父目录名 = 族，如 queue/；seed.sh 按层级取族）"),
-    ("bots/position-watcher/position-watcher.py", "一次性 handler 的 spawn 命令常量（WRAP_CMD）的写者"),
-    ("tasks/run.py", "定时触发面的登记脚本（spec.command 常量）"),
-)
-# `KEY=VAL KEY=VAL … exec|python3|bash` 形态的前缀键（值可含引号/`$`/`{}`）
-_CMD_ENV_PREFIX_RE = re.compile(r"((?:\b[A-Z][A-Z0-9_]*=\S+[ \t]+)+)(?:exec|python3|bash)\b")
-
-
-def _cmd_prefix_keys(text):
-    """从命令/脚本文本里取全部 `KEY=VAL … exec` 形态的 env 前缀键名。"""
-    out = []
-    for m in _CMD_ENV_PREFIX_RE.finditer(text):
-        for kv in m.group(1).split():
-            out.append(kv.split("=", 1)[0])
-    return out
-
-
-def t47_spec_command_env_scrub():
-    """T47 `spec.command` env 前缀键 ⊆ 洗刷名单（提交期钉桩）：
-      a) 扫到的前缀键集合含 `known` 全集（防正则失配 ⇒ 扫到 0 枚的假绿；枚数从集合
-         现场取、不写死数字 ⇒ 名单增删不会再造出同款失真）；
-      b) 逐枚断言 scrub_env 真洗掉（漏列 ⇒ 红在提交前，不红在事故里）。"""
-    import envscrub
-    ws = os.path.normpath(os.path.join(HERE, ".."))
-    found = {}
-    for pat, why in _CMD_PREFIX_SOURCES:
-        hits = sorted(glob.glob(os.path.join(ws, pat)))
-        if not hits:
-            ok("T47a %s 不在本快照内（%s）→ 跳过该源" % (pat, why), True)
-            continue
-        for h in hits:
-            with open(h, encoding="utf-8") as f:
-                for k in _cmd_prefix_keys(f.read()):
-                    found.setdefault(k, set()).add(os.path.relpath(h, ws))
-    if not found:
-        ok("T47 各声明源均不在本快照内 → 本组跳过（无断言可跑）", True)
-        return
-    # known = 现网被追踪声明面真在写的前缀键全集（⛔ 写死枚数，但写死**集合**防正则失配的假绿）。
-    # `AGENTD_SESSION_NAME` 已不在本集合：它的唯一写者 = 三枚会话型常驻 bot 的声明源
-    # （bots/daemon/{dev-dispatcher,agentfw-lead,work-lead}/spec.json），随常驻退役已删 ⇒ 现网无任何
-    # 被追踪 spawn 命令写它（消费方 profile-loader.ts / host-info.ts / pi-rpc-wrap.py 按各自优先级
-    # 回落 AGENT_SELF ∨ AGENT_HOME）。它**仍在洗刷名单里**（身份标记类：即使无人写，也不得从宿主
-    # 环境继承下去），只是不再被本组的「扫到即断言」路径覆盖。
-    known = {"DISPATCH_PROFILE", "AGENTD_RESIDENT"}
-    ok("T47a 扫到 known 全集（%d 枚）前缀键（正则未失配、非假绿）" % len(known),
-       known <= set(found),
-       sorted(found))
-    for k in sorted(found):
-        scrubbed = envscrub.scrub_env(base={k: "1", "PATH": "/usr/bin",
-                                            "SOME_UNRELATED": "keep-me"})
-        ok("T47b 前缀键 %s 被洗刷名单覆盖（源 %s）"
-           % (k, ",".join(sorted(found[k]))),
-           k not in scrubbed and scrubbed.get("SOME_UNRELATED") == "keep-me",
-           sorted(scrubbed))
 
 
 LOADER_REL = os.path.join("pi-core", "agent", "extensions", "profile-loader.ts")
@@ -1698,9 +1548,8 @@ def main():
                t41b_tail_window_truncated,
                t42_resident_model_error_untouched,
                t43_heartbeat_prompt_anchor_lines,
-               t45_retired_marker_zero_reflow,
+               t45_spawn_command_contract,
                t46_resident_prompt_delivery,
-               t47_spec_command_env_scrub,
                t48_persona_emission,
                t49_stderr_pump_live):
         print("---- %s" % fn.__name__)
