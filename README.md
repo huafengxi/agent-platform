@@ -17,7 +17,7 @@
 
 ## 安装
 
-陌生用户可先用[离线最小安装入口](portable/README.md)：显式文件清单构建归档，安装到独立目录，只需 Python 标准库与 bash；包含配置检查、CLI 和真实无模型 shell 任务链路，不包含完整六模块部署或个人配置。
+陌生用户可先用[绿色最小运行入口](portable/README.md)：clone 或解包后直接运行 `portable/run.sh doctor/demo/ctl`，无复制安装或必填配置；只需 Python 标准库与 bash，包含检查、CLI 和真实无模型 shell 任务链路，不包含完整六模块部署或个人配置。默认状态在包内 `workspace/`，可用 `PLATFORM_WORKSPACE` 外置；打包方可按显式文件清单构建归档。
 
 将本仓放到调用方工作区下，使用仓内模块路径调用 CLI，例如：
 
