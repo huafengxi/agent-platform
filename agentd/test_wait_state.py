@@ -1,8 +1,8 @@
-"""Current waits through real wrapper RPC -> actual tasks.md widget -> HTML.
+"""No task-tab wait guesses or persistent observation side channel.
 
-Run with ASK_WAIT_DRIVER=<caller's ask-wait.test.mjs> and optionally
-TASK_MARKED_JS=<caller's marked.min.js> to include those integrations.
-Every mutable root is created below a new temporary base; no live sockets.
+Keep the real TS ask producer, RPC wrapper, widget/HTML and socket regressions.
+Existing session JSONL calls/results cannot establish a current blocking wait.
+Mutable fixtures and sockets live only below this invocation's fresh temp base.
 """
 import importlib.util
 import json
@@ -20,8 +20,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import proto
-import report
-from wait_state import CurrentWaits, current_waits
+from wait_state import DialogRequests
 from safe_delete import safe_rmtree
 
 spec = importlib.util.spec_from_file_location('wait_wrap', HERE.parent / 'pi-wrap/pi-rpc-wrap.py')
@@ -29,14 +28,16 @@ wrapmod = importlib.util.module_from_spec(spec)
 sys.path.insert(0, str(HERE.parent / 'pi-wrap'))
 spec.loader.exec_module(wrapmod)
 
-# A real subprocess speaking RPC, without a model or browser. File asks invoke
-# the real TS extension driver; dialogs are native RPC requests with responses.
+# The trace is fixture-only: a copy of existing RPC events, not a new production
+# session protocol or source used by the report.
 FAKE = r'''#!/usr/bin/env python3
 import json,os,subprocess,sys,threading,time
 lock=threading.Lock()
 def emit(obj):
  with lock:
-  print(json.dumps(obj),flush=True)
+  line=json.dumps(obj)
+  with open(os.environ['AGENT_HOME']+'/fixture-rpc.jsonl','a') as f: f.write(line+'\n')
+  print(line,flush=True)
 def finish():
  emit({'type':'tool_execution_end','toolCallId':'dialog-tool','toolName':'ask_user'})
  emit({'type':'agent_end'})
@@ -45,8 +46,7 @@ def ask():
  cmd=['node',os.environ['ASK_WAIT_DRIVER'],os.environ['AGENT_ROOT']]
  if os.environ.get('WAIT_TEST_MODE')=='timeout': cmd.append('timeout')
  p=subprocess.Popen(cmd,stdout=subprocess.PIPE,text=True)
- for line in p.stdout:
-  with lock: print(line.strip(),flush=True)
+ for line in p.stdout: emit(json.loads(line))
  if p.wait(): os._exit(2)
  emit({'type':'agent_end'})
  emit({'type':'agent_settled'})
@@ -58,11 +58,9 @@ for line in sys.stdin:
   if os.environ.get('WAIT_TEST_MODE','').startswith('dialog'):
    emit({'type':'tool_execution_start','toolCallId':'dialog-tool','toolName':'ask_user'})
    request={'type':'extension_ui_request','method':'select','id':'current-dialog','title':'Choose live option','options':['yes','no']}
-   if os.environ['WAIT_TEST_MODE']=='dialog-timeout': request['timeout']=2000
+   if os.environ['WAIT_TEST_MODE']=='dialog-timeout': request['timeout']=1000
    emit(request)
-   # Leave a gap after the native deadline, before tool completion, so the
-   # widget must use the deadline rather than rely only on tool_end cleanup.
-   if os.environ['WAIT_TEST_MODE']=='dialog-timeout': threading.Timer(4,finish).start()
+   if os.environ['WAIT_TEST_MODE']=='dialog-timeout': threading.Timer(3,finish).start()
   else: threading.Thread(target=ask).start()
  elif cmd['type']=='extension_ui_response':
   with open(os.path.join(os.environ['AGENT_HOME'],'dialog-response.json'),'w') as f: json.dump(cmd,f)
@@ -81,7 +79,7 @@ class WaitTests(unittest.TestCase):
         self.addCleanup(lambda: safe_rmtree(self.root, authorized_root=self.base))
         target = self.root / 'agent-platform/agentd'
         target.mkdir(parents=True)
-        for name in ('report.py', 'wait_state.py', 'proto.py', 'scheduling.py', 'task_state.py', 'task_labels.py', 'tasks.md', 'agentctl.py', 'registration.py'):
+        for name in ('report.py', 'proto.py', 'scheduling.py', 'task_state.py', 'task_labels.py', 'tasks.md', 'agentctl.py', 'registration.py'):
             shutil.copyfile(HERE / name, target / name)
         shutil.copyfile(HERE.parent / 'platform_paths.py', target.parent / 'platform_paths.py')
         (target.parent / '.platform-root').touch()
@@ -93,7 +91,6 @@ class WaitTests(unittest.TestCase):
         self.pid = dict(pid=os.getpid(), procStart=proto.proc_starttime(os.getpid()), gen=1,
                         status='running', final=False, lastAliveAt=proto.now_ts(), startedAt=proto.now_ts())
         self.put('pid.json', self.pid)
-        self.state = CurrentWaits(str(self.home), 'task/wait-fixture')
         self.env = dict(os.environ, PLATFORM_WORKSPACE=str(self.root), AGENT_ROOT=str(self.root),
                         AGENT_SELF='task/wait-fixture', AGENT_HOME=str(self.home),
                         PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH'])
@@ -102,8 +99,6 @@ class WaitTests(unittest.TestCase):
         proto.atomic_write_json(str(self.home / file), doc)
 
     def page(self):
-        # Execute precisely the active widget command from the real page, with
-        # identical copied source and a caller-supplied isolated workspace.
         page = (self.root / 'agent-platform/agentd/tasks.md').read_text()
         command = next(c for c in re.findall(r'\$\{([^}]+)\}', page) if c.endswith('-s active'))
         result = subprocess.run(['bash', '-c', command], cwd=self.root, env=self.env,
@@ -111,141 +106,134 @@ class WaitTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
-    def start_ask(self, deadline=None, since=None):
-        self.state.event(dict(type='tool_execution_start', toolCallId='ask-tool', toolName='ask_dispatcher'))
-        self.state.event(dict(type='tool_execution_update', toolCallId='ask-tool', toolName='ask_dispatcher',
-             partialResult={'details': {'agentdWait': dict(askId='current-ask', question='Which option? | [a] <script>',
-             recipient='queue/dispatcher', since=time.time()-65 if since is None else since, deadline=deadline)}}))
+    def assert_no_hint(self, text=None):
+        text = self.page() if text is None else text
+        for label in ('待答复', '待用户答复', '已等待', '**❓', '--type reply --ref'):
+            self.assertNotIn(label, text)
+        return text
 
-    def test_file_wait_and_exact_reply_entrance(self):
-        self.start_ask()
-        text = self.page()
-        self.assertIn('**❓ 待答复（协调者）**', text)
-        self.assertIn('已等待 1m', text)
-        self.assertIn('/fixture-host/agents/task/wait-fixture/spec.json?v=chat', text)
-        self.assertIn('--ref current-ask', text)
-        self.assertNotIn('待用户答复', text)
-        self.assertIn('&lt;script&gt;', text)
-        self.assertIn('\\|', text)
+    def session(self, tool='ask_dispatcher', result=None, timeout=0):
+        # Native session format: a toolCall is a model proposal, not a wait
+        # entry. Missing toolResult does not prove execute is still blocking.
+        directory = self.home / 'session'
+        directory.mkdir(exist_ok=True)
+        rows = [dict(type='session', version=3, id='session-fixture', timestamp='2026-01-01T00:00:00Z', cwd=str(self.root)),
+                dict(type='message', id='call-entry', parentId=None, timestamp='2026-01-01T00:00:01Z',
+                     message=dict(role='assistant', stopReason='toolUse', content=[dict(type='toolCall', id='call', name=tool,
+                         arguments=dict(question='Which option? | [one] <script> 待用户答复', timeoutMinutes=timeout, type='ask'))]))]
+        if result is not None:
+            rows.append(dict(type='message', id='result-entry', parentId='call-entry', timestamp='2026-01-01T00:00:03Z',
+                             message=dict(role='toolResult', toolCallId='call', toolName=tool,
+                                          content=[dict(type='text', text=result)], isError=False)))
+        (directory / 'session.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
 
-    def test_reply_clears_before_tool_end_and_next_refresh(self):
-        self.start_ask()
-        proto.write_message(str(self.home / 'inbox'), dict(type='reply', ref='current-ask', body='done'))
-        self.assertNotIn('**❓', self.page())
-
-    def test_tool_return_timeout_and_terminal_clear(self):
-        self.start_ask()
-        self.state.event(dict(type='tool_execution_end', toolCallId='ask-tool'))
-        self.assertNotIn('**❓', self.page())
-        self.start_ask(deadline=time.time()-1)
-        self.assertNotIn('**❓', self.page())
-        self.start_ask()
-        self.pid.update(final=True, status='exited', exitcode=0)
-        self.put('pid.json', self.pid)
-        self.assertNotIn('**❓', self.page())
-
-    def test_no_wait_nonblocking_historical_and_old_gen(self):
-        # Real pending envelopes, including a nonblocking send_message ask,
-        # never suffice to imply a current tool wait.
+    def test_session_calls_results_and_envelopes_do_not_guess_waits(self):
+        cases = [('unfinished', 'ask_dispatcher', None, 0), ('nonblocking', 'send_message', None, 0),
+                 ('answered', 'ask_dispatcher', 'fixture answer', 0), ('timed-out', 'ask_dispatcher', 'timeout', .001),
+                 ('deadline-no-result', 'ask_dispatcher', None, .001), ('dialog', 'ask_user', None, 0),
+                 ('cancelled-dialog', 'ask_user', 'cancelled', 0), ('notify-keywords', 'notify', '待用户答复', 0)]
+        for name, tool, result, timeout in cases:
+            with self.subTest(name=name):
+                self.session(tool, result, timeout)
+                self.assert_no_hint()
         for via in (None, 'send_message'):
             msg = dict(type='ask', **{'from':'task/wait-fixture'}, body=json.dumps({'question':'old ask'}))
             if via: msg['via'] = via
-            proto.write_message(str(self.root / 'agents/queue/dispatcher/inbox'), msg)
-        self.assertNotIn('**❓', self.page())
-        self.state.event(dict(type='tool_execution_start', toolCallId='send', toolName='send_message', args={'type':'ask'}))
-        self.assertNotIn('**❓', self.page())
-        self.start_ask()
-        self.pid.update(gen=2, procStart=self.pid['procStart']+1)
-        self.put('pid.json', self.pid)
-        self.assertNotIn('**❓', self.page())
+            mid, _ = proto.write_message(str(self.root / 'agents/queue/dispatcher/inbox'), msg)
+            self.assert_no_hint()
+            proto.write_message(str(self.home / 'inbox'), dict(type='reply', ref=mid, body='answered'))
+            self.assert_no_hint()
 
-    def test_unrelated_settlement_does_not_erase_inflight_wait(self):
-        self.state.event(dict(type='agent_start'))
-        self.state.event(dict(type='agent_start'))
-        self.start_ask()
-        self.state.event(dict(type='agent_settled'))
-        self.state.event(dict(type='agent_end'))
-        self.assertIn('待答复（协调者）', self.page())
-        self.state.event(dict(type='agent_end'))
-        self.assertNotIn('**❓', self.page())
+    def test_old_snapshot_generation_terminal_and_nonlinux_do_not_hint(self):
+        self.session()
+        self.put('wait-state.json', dict(version=1, task='task/wait-fixture', pid=self.pid['pid'], procStart=self.pid['procStart'],
+                 waits=[dict(kind='ask', askId='old', question='stale sentinel', since=time.time()-60)]))
+        for updates in ({}, {'gen':2}, {'procStart':None}, {'final':True, 'status':'exited', 'exitcode':0}):
+            with self.subTest(updates=updates):
+                self.pid.update(updates)
+                self.put('pid.json', self.pid)
+                self.assertNotIn('stale sentinel', self.assert_no_hint())
+        # Old files are ignored, not deleted or rewritten by the report.
+        self.assertTrue((self.home / 'wait-state.json').exists())
 
-    def test_unreliable_time_not_invented_and_stale_heartbeat(self):
-        self.start_ask(since='unknown')
-        self.assertNotIn('已等待', self.page())
-        self.pid['lastAliveAt'] = '2000-01-01-00-00-00.000'
-        self.put('pid.json', self.pid)
-        self.assertNotIn('**❓', self.page())
+    def test_http_adapter_and_actual_widget_html(self):
+        adapter_spec = importlib.util.spec_from_file_location('wait_adapter', HERE / 'agentd4web.py')
+        adapter = importlib.util.module_from_spec(adapter_spec)
+        adapter_spec.loader.exec_module(adapter)
+        self.session()
+        with patch.dict(os.environ, self.env): body = adapter.interp(None)[1]
+        self.assert_no_hint(body)
+        self.assertIn('/fixture-host/agents/task/wait-fixture/spec.json?v=chat', body)
 
-    def test_dialog_methods_response_timeout_abort_and_notice(self):
+    def test_actual_widget_html_with_site_marked(self):
+        marked = os.environ.get('TASK_MARKED_JS')
+        if not marked: self.skipTest('set TASK_MARKED_JS for the site renderer')
+        self.session()
+        result = subprocess.run(['node', '-e', 'const fs=require("fs"),m=require(process.argv[1]);console.log(m.parse(fs.readFileSync(0,"utf8")))', marked], input=self.page(), text=True, capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_no_hint(result.stdout)
+        self.assertIn('href="/fixture-host/agents/task/wait-fixture/spec.json?v=chat"', result.stdout)
+        self.assertNotIn('<script>', result.stdout)
+        self.assertEqual(result.stdout.count('<td>'), 9)
+
+    def test_dialog_memory_baseline_no_file_ask_observer(self):
+        state = DialogRequests()
+        state.event(dict(type='tool_execution_start', toolCallId='ask', toolName='ask_dispatcher'))
+        state.event(dict(type='tool_execution_update', toolCallId='ask', toolName='ask_dispatcher',
+                         partialResult={'details':{'agentdWait':{'askId':'old','question':'legacy update'}}}))
+        self.assertEqual(state.waits, {})
         for method in ('select', 'confirm', 'input', 'editor'):
             with self.subTest(method=method):
-                self.state.event(dict(type='extension_ui_request', method=method, id='dialog', title='Live question'))
-                text = self.page()
-                self.assertIn('**❓ 待用户答复**', text)
-                self.assertIn('[打开并答复](/fixture-host/agents/task/wait-fixture/spec.json?v=chat)', text)
-                self.state.sent(dict(type='extension_ui_response', id='dialog', value='yes'))
-                self.assertNotIn('**❓', self.page())
-        self.state.event(dict(type='extension_ui_request', method='notify', id='notice', message='not a wait'))
-        self.assertNotIn('**❓', self.page())
-        self.state.event(dict(type='extension_ui_request', method='input', id='timeout', title='Old', timeout=1))
+                state.event(dict(type='extension_ui_request', method=method, id='d', title='Live'))
+                self.assertEqual(state.dialogs()[0]['id'], 'd')
+                state.sent(dict(type='abort'))  # no evidence of native Promise settlement
+                self.assertTrue(state.dialogs())
+                state.sent(dict(type='extension_ui_response', id='d', cancelled=True))
+                self.assertEqual(state.dialogs(), [])
+        state.event(dict(type='extension_ui_request', method='notify', id='notice', message='not a wait'))
+        self.assertEqual(state.dialogs(), [])
+        state.event(dict(type='extension_ui_request', method='input', id='expired', timeout=1))
         time.sleep(.01)
-        self.assertNotIn('**❓', self.page())
-        self.state.event(dict(type='extension_ui_request', method='input', id='abort', title='Old'))
-        self.state.sent(dict(type='abort'))
-        self.assertIn('**❓', self.page())  # bare abort cannot resolve an un-signalled UI Promise
-        self.state.sent(dict(type='extension_ui_response', id='abort', cancelled=True))
-        self.assertNotIn('**❓', self.page())
+        self.assertEqual(state.dialogs(), [])
+        self.assertFalse((self.home / 'wait-state.json').exists())
 
     def test_replay_current_dialog_not_history_even_after_ring_eviction(self):
         with patch.dict(os.environ, self.env): w = wrapmod.Wrap()
-        self.state = w.waits
         obj = dict(type='extension_ui_request', id='dialog', method='input', title='Current', timeout=10000)
         w._on_event(obj)
         w.ring.append((json.dumps(obj)+'\n').encode())
         replay = [json.loads(b) for b in w.replay_lines()]
         self.assertEqual(len(replay), 1)
         self.assertLess(replay[0]['timeout'], 10000)
-        w.ring.clear()  # live dialog still has a valid answer entrance
+        w.ring.clear()
         self.assertEqual(len(list(w.replay_lines())), 1)
-        w.waits.sent(dict(type='extension_ui_response', id='dialog', value='done'))
+        w.dialog_requests.sent(dict(type='extension_ui_response', id='dialog', value='done'))
         w.ring.append((json.dumps(obj)+'\n').encode())
         self.assertEqual(list(w.replay_lines()), [])
+        self.assertFalse((self.home / 'wait-state.json').exists())
 
-    def test_dialog_terminal_and_generation_filter(self):
-        self.state.event(dict(type='extension_ui_request', method='select', id='d', title='Live'))
-        self.pid.update(final=True, status='exited', exitcode=0)
-        self.put('pid.json', self.pid)
-        self.assertNotIn('**❓', self.page())
-        self.pid.update(final=False, status='running', gen=2, procStart=self.pid['procStart']+1)
-        self.put('pid.json', self.pid)
-        self.assertNotIn('**❓', self.page())
+    def test_tool_end_and_turn_settlement_keep_dialog_replay_semantics(self):
+        state = DialogRequests()
+        state.event(dict(type='agent_start'))
+        state.event(dict(type='agent_start'))
+        state.event(dict(type='tool_execution_start', toolCallId='tool'))
+        state.event(dict(type='extension_ui_request', id='d', method='input', title='Live'))
+        state.event(dict(type='agent_settled'))
+        state.event(dict(type='agent_end'))
+        self.assertTrue(state.dialogs())
+        state.event(dict(type='tool_execution_end', toolCallId='other-tool'))
+        self.assertTrue(state.dialogs())
+        state.event(dict(type='tool_execution_end', toolCallId='tool'))
+        self.assertFalse(state.dialogs())
+        state.event(dict(type='extension_ui_request', id='d2', method='input'))
+        state.event(dict(type='agent_end'))
+        self.assertFalse(state.dialogs())
 
-    def test_report_http_adapter_uses_current_snapshot(self):
-        adapter_spec = importlib.util.spec_from_file_location('wait_adapter', HERE / 'agentd4web.py')
-        adapter = importlib.util.module_from_spec(adapter_spec)
-        adapter_spec.loader.exec_module(adapter)
-        self.start_ask()
-        with patch.dict(os.environ, self.env):
-            body = adapter.interp(None)[1]
-        self.assertIn('待答复（协调者）', body)
-        self.assertIn('--ref current-ask', body)
-
-    def test_actual_widget_html_with_site_marked(self):
-        marked = os.environ.get('TASK_MARKED_JS')
-        if not marked: self.skipTest('set TASK_MARKED_JS for the site renderer')
-        self.start_ask()
-        result = subprocess.run(['node', '-e', 'const fs=require("fs"),m=require(process.argv[1]);console.log(m.parse(fs.readFileSync(0,"utf8")))', marked], input=self.page(), text=True, capture_output=True, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('<strong>❓ 待答复（协调者）</strong>', result.stdout)
-        self.assertIn('href="/fixture-host/agents/task/wait-fixture/spec.json?v=chat"', result.stdout)
-        self.assertNotIn('<script>', result.stdout)
-        self.assertEqual(result.stdout.count('<td>'), 10)
-
-    def run_wrapper(self, mode):
+    def run_wrapper(self, mode, source=FAKE):
         if not mode.startswith('dialog') and not os.environ.get('ASK_WAIT_DRIVER'):
             self.skipTest('set ASK_WAIT_DRIVER for the actual TS producer')
         fake = self.root / 'fake-pi'
-        fake.write_text(FAKE.replace('#!/usr/bin/env python3', '#!' + sys.executable))
+        fake.write_text(source.replace('#!/usr/bin/env python3', '#!' + sys.executable))
         fake.chmod(0o700)
         (self.home / 'prompt.md').write_text('fixture prompt')
         env = dict(self.env, AGENTD_WRAP_PI_BIN=str(fake), AGENTD_WRAP_SETTLE_WINDOW='0.05',
@@ -269,53 +257,42 @@ class WaitTests(unittest.TestCase):
             time.sleep(.02)
         self.fail('isolated RPC condition timed out: ' + (self.root / 'wrapper.log').read_text())
 
-    def test_real_wrapper_file_ask_producer_answer(self):
-        p = self.run_wrapper('answer')
-        self.until(lambda: bool(current_waits(str(self.root), 'task/wait-fixture', self.pid, time.time())))
-        text = self.page()
-        self.assertIn('待答复（协调者）', text)
-        asks = proto.list_task_asks(str(self.root), 'task/wait-fixture')
-        self.assertEqual(len(asks), 1)
-        self.assertIn('--ref ' + asks[0]['id'], text)
-        proto.write_message(str(self.home / 'inbox'), dict(type='reply', ref=asks[0]['id'], body='fixture answer'))
-        self.assertEqual(p.wait(timeout=10), 0, (self.root / 'wrapper.log').read_text())
-        self.assertNotIn('**❓', self.page())
+    def trace(self):
+        try: return [json.loads(l) for l in (self.home / 'fixture-rpc.jsonl').read_text().splitlines()]
+        except (OSError, ValueError): return []
 
-    def test_widget_reply_command_targets_current_ask_not_oldest(self):
-        # The displayed entrance must work, not merely contain a plausible ref.
-        # An older nonblocking ask makes the generic `answer` shortcut unsafe.
+    def test_real_producer_exact_ref_reply_preserves_old_nonblocking_ask(self):
         old_id, _ = proto.write_message(str(self.root / 'agents/queue/dispatcher/inbox'),
-            dict(type='ask', **{'from': 'task/wait-fixture'}, via='send_message',
-                 body=json.dumps({'question': 'Older nonblocking question'})))
+            dict(type='ask', **{'from':'task/wait-fixture'}, via='send_message', body=json.dumps({'question':'Older nonblocking question'})))
         p = self.run_wrapper('answer')
-        self.until(lambda: bool(current_waits(str(self.root), 'task/wait-fixture', self.pid, time.time())))
-        text = self.page()
-        command = next(c for c in re.findall(r'`([^`]+)`', text)
-                       if '--type reply --ref ' in c)
+        self.until(lambda: len(proto.list_task_asks(str(self.root), 'task/wait-fixture')) == 2)
+        self.assert_no_hint()
+        asks = proto.list_task_asks(str(self.root), 'task/wait-fixture')
+        current = next(a for a in asks if a['id'] != old_id)
         answer = self.root / 'answer.txt'
         answer.write_text('fixture answer')
-        command = command.replace('<答复文件>', 'answer.txt')
-        result = subprocess.run(['bash', '-c', command], cwd=self.root,
-            env=dict(self.env, AGENT_SELF='queue/dispatcher'),
-            text=True, capture_output=True, timeout=10)
+        result = subprocess.run([sys.executable, 'agent-platform/agentd/agentctl.py', 'send', 'task/wait-fixture',
+            '--type','reply','--ref',current['id'],'--body-file',str(answer)], cwd=self.root,
+            env=dict(self.env, AGENT_SELF='queue/dispatcher'), text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
-        replies = [m for m in proto.list_messages(str(self.home / 'inbox')) if m.get('type') == 'reply']
-        self.assertEqual(len(replies), 1)
-        self.assertNotEqual(replies[0]['ref'], old_id)
-        self.assertNotEqual(replies[0].get('via'), 'send_message')
         self.assertEqual(p.wait(timeout=10), 0, (self.root / 'wrapper.log').read_text())
-        self.assertNotIn('**❓', self.page())
-        # The unrelated unanswered ask still exists, without becoming a wait.
         self.assertEqual(proto.find_pending_ask(str(self.root), 'task/wait-fixture')['id'], old_id)
+        replies = [m for m in proto.list_messages(str(self.home / 'inbox')) if m.get('type')=='reply']
+        self.assertEqual([m['ref'] for m in replies], [current['id']])
+        self.assertFalse(any(e.get('type')=='tool_execution_update' for e in self.trace()))
+        self.assertFalse((self.home / 'wait-state.json').exists())
+        self.assert_no_hint()
 
-    def test_real_wrapper_file_ask_producer_timeout(self):
+    def test_real_wrapper_file_ask_timeout(self):
         p = self.run_wrapper('timeout')
         self.assertEqual(p.wait(timeout=10), 0, (self.root / 'wrapper.log').read_text())
         self.assertEqual(len(proto.list_task_asks(str(self.root), 'task/wait-fixture')), 1)
-        self.assertNotIn('**❓', self.page())
+        self.assertFalse((self.home / 'wait-state.json').exists())
+        self.assert_no_hint()
 
     def dialog_client(self):
         import socket
+        self.until(lambda: any(e.get('type')=='extension_ui_request' for e in self.trace()))
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.addCleanup(client.close)
         client.settimeout(5)
@@ -324,52 +301,78 @@ class WaitTests(unittest.TestCase):
         self.addCleanup(stream.close)
         while True:
             obj = json.loads(stream.readline())
-            if obj.get('type') == 'extension_ui_request': break
+            if obj.get('type')=='extension_ui_request': break
         self.assertEqual(obj['id'], 'current-dialog')
         return client
 
-    def test_real_wrapper_no_browser_dialog_attach_and_reply(self):
+    def check_dialog_response(self, cancelled):
         p = self.run_wrapper('dialog')
-        self.until(lambda: bool(current_waits(str(self.root), 'task/wait-fixture', self.pid, time.time())))
-        self.assertIn('待用户答复', self.page())
         client = self.dialog_client()
-        client.sendall(b'{"type":"extension_ui_response","id":"current-dialog","value":"yes"}\n')
-        self.assertEqual(p.wait(timeout=10), 0)
-        self.assertNotIn('**❓', self.page())
-
-    def test_real_wrapper_dialog_cancelled_response_clears_widget(self):
-        p = self.run_wrapper('dialog')
-        self.until(lambda: bool(current_waits(str(self.root), 'task/wait-fixture', self.pid, time.time())))
-        self.assertIn('待用户答复', self.page())
-        client = self.dialog_client()
-        client.sendall(b'{"type":"extension_ui_response","id":"current-dialog","cancelled":true}\n')
+        self.assert_no_hint()
+        client.sendall((json.dumps(dict(type='extension_ui_response', id='current-dialog', value='yes', cancelled=cancelled))+'\n').encode())
         self.assertEqual(p.wait(timeout=10), 0)
         response = json.loads((self.home / 'dialog-response.json').read_text())
-        self.assertIs(response['cancelled'], True)
-        self.assertNotIn('**❓', self.page())
+        self.assertIs(response['cancelled'], cancelled)
+        self.assertFalse((self.home / 'wait-state.json').exists())
+        self.assert_no_hint()
 
-    def test_real_wrapper_dialog_deadline_clears_before_tool_end(self):
+    def test_real_wrapper_dialog_attach_reply(self):
+        self.check_dialog_response(False)
+
+    def test_real_wrapper_dialog_cancelled_response(self):
+        self.check_dialog_response(True)
+
+    def test_real_wrapper_deadline_before_tool_end_and_generation(self):
         p = self.run_wrapper('dialog-timeout')
-        self.until(lambda: bool(current_waits(str(self.root), 'task/wait-fixture', self.pid, time.time())))
-        self.assertIn('待用户答复', self.page())
-        deadline = proto.read_json(str(self.home / 'wait-state.json'))['waits'][0]['deadline']
-        time.sleep(max(0, deadline - time.time()) + .03)
-        self.assertIsNone(p.poll())  # still blocked before the fixture's tool end
-        self.assertNotIn('**❓', self.page())
-        self.assertEqual(p.wait(timeout=10), 0)
-
-    def test_real_wrapper_old_incarnation_cannot_supply_new_generation_wait(self):
-        p = self.run_wrapper('dialog')
-        self.until(lambda: bool(current_waits(str(self.root), 'task/wait-fixture', self.pid, time.time())))
-        self.assertIn('待用户答复', self.page())
-        self.pid.update(gen=2, procStart=self.pid['procStart'] + 1)
+        self.until(lambda: any(e.get('type')=='extension_ui_request' for e in self.trace()))
+        self.assert_no_hint()
+        time.sleep(1.1)
+        self.assertIsNone(p.poll())
+        self.assertFalse(any(e.get('type')=='tool_execution_end' for e in self.trace()))
+        self.assert_no_hint()
+        self.pid.update(gen=2, procStart=None)
         self.put('pid.json', self.pid)
-        self.assertIsNone(p.poll())  # old producer still live, not just a stale file
-        self.assertNotIn('**❓', self.page())
-        client = self.dialog_client()
-        client.sendall(b'{"type":"extension_ui_response","id":"current-dialog","cancelled":true}\n')
+        self.assert_no_hint()
         self.assertEqual(p.wait(timeout=10), 0)
-        self.assertNotIn('**❓', self.page())
+        self.assertFalse((self.home / 'wait-state.json').exists())
+
+    def test_native_signal_resolved_with_tool_still_running_no_hint(self):
+        # Execute the installed native helper unchanged. This tests the report's
+        # no-guess policy, NOT a fix to the native RPC/replay settlement gap.
+        cli = shutil.which('pi')
+        if not cli: self.skipTest('pi native source unavailable')
+        native = Path(cli).resolve().parents[1] / 'dist/modes/rpc/rpc-mode.js'
+        if not native.exists(): self.skipTest('pi native source unavailable')
+        source = '#!' + shutil.which('node') + '\n' + r'''
+const fs=require('node:fs'),crypto=require('node:crypto'),readline=require('node:readline');
+const emit=o=>console.log(JSON.stringify(o));
+const pendingExtensionRequests=new Map();
+const source=fs.readFileSync(NATIVE,'utf8');
+const start=source.indexOf('    function createDialogPromise(');
+const end=source.indexOf('\n    /**',start);
+const createDialogPromise=new Function('crypto','output','pendingExtensionRequests',
+ 'return ('+source.slice(start,end).trim()+')')(crypto,emit,pendingExtensionRequests);
+readline.createInterface({input:process.stdin}).on('line',async line=>{
+ const cmd=JSON.parse(line);
+ if(cmd.type==='prompt'){
+  emit({type:'response',command:'prompt',id:cmd.id,success:true});
+  emit({type:'agent_start'});
+  emit({type:'tool_execution_start',toolCallId:'native-tool',toolName:'native-fixture'});
+  const controller=new AbortController();
+  setTimeout(()=>controller.abort(),300);
+  await createDialogPromise({signal:controller.signal},undefined,
+    {method:'input',title:'Signal cancelled native dialog'},r=>r.value);
+  fs.writeFileSync(process.env.AGENT_HOME+'/native-resolved.json',JSON.stringify({resolved:true,pending:pendingExtensionRequests.size}));
+  // No tool end: continue non-dialog work after the real Promise resolves.
+ }
+});
+'''.replace('NATIVE', json.dumps(str(native)))
+        p = self.run_wrapper('dialog-signal', source)
+        self.until(lambda: (self.home / 'native-resolved.json').exists())
+        self.assertEqual(json.loads((self.home / 'native-resolved.json').read_text()), {'resolved':True,'pending':0})
+        self.assertIsNone(p.poll())
+        self.assert_no_hint()
+        self.assertFalse((self.home / 'wait-state.json').exists())
 
 
 if __name__ == '__main__':
