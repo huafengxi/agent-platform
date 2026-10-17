@@ -2,40 +2,41 @@
 每报表小节一个 cmd widget：单独 run/refresh 互不牵连（替代原整页 15s 刷新）；
 页面带 `_v=autorun` 打开自动执行；命令路径相对调用方工作区根（同本仓 README 的 CLI 调用约定）。采集与渲染口径 = `agentd/report.py`。
 末节「旧 task 清理」是本页唯一含**变更**动作的一节（感叹号前缀的手动 widget，autorun/run-all 跳过）：
+入口使用普通／手动 cmd anchor（协议由宿主页的扩展库处理）；表格内均为普通链接。
 候选判据、保留期缺省值与删除动作都住主仓的 `dash/gc-tasks.py`（单文件两子命令：`report` 只读取数 / `run --yes` 变更），
 本页只引用、不写死政策取值（改保留期不产生本仓 diff）。
 -->
 
 ## 异常与阻塞
 
-${python3 agent-platform/agentd/report.py -s abnormal}
+[刷新异常与阻塞](<cmd:python3 agent-platform/agentd/report.py -s abnormal>)
 
 ## 未终态任务
 
-${python3 agent-platform/agentd/report.py -s active}
+[刷新未终态任务](<cmd:python3 agent-platform/agentd/report.py -s active>)
 
 ## 最近终态
 
-${python3 agent-platform/agentd/report.py -s recent}
+[刷新最近终态](<cmd:python3 agent-platform/agentd/report.py -s recent>)
 
 <details>
 <summary>基础设施与状态统计</summary>
 
 ## 基础设施健康
 
-${python3 agent-platform/agentd/report.py -s system}
+[刷新基础设施健康](<cmd:python3 agent-platform/agentd/report.py -s system>)
 
 ## 状态统计
 
-${python3 agent-platform/agentd/report.py -s stats}
+[刷新状态统计](<cmd:python3 agent-platform/agentd/report.py -s stats>)
 
 ## bot 状态
 
-${python3 agent-platform/agentd/report.py -s bots}
+[刷新 bot 状态](<cmd:python3 agent-platform/agentd/report.py -s bots>)
 
 ## topic
 
-${python3 agent-platform/agentd/report.py -s topics}
+[刷新 topic](<cmd:python3 agent-platform/agentd/report.py -s topics>)
 
 </details>
 
@@ -55,7 +56,7 @@ ${python3 agent-platform/agentd/report.py -s topics}
 - 最近 10 个终态任务：完成时间降序
 - 旧 task 清理·候选判据：`task/<id>/pid.json` 的 `final=true` ∧ `endedAt` 早于 now − 保留期（缺省 3 天，取值与判据单点 = `dash/gc-tasks.py` 的 `report`/`run` 共用那一套）；在飞/未启动、保留窗内、以及 `pid.json` 半截坏或终态却无可解析 `endedAt`（= 不可判定，单独计数）一律不入选；`bot/`、`topic/` 两族不在射程
 - 旧 task 清理·删除范围：**整个 `task/<id>/` 目录**（`report.md`/`prompt.md`/`plan.md`/`progress.md` 与 `session/` 转录一并消失，不可逆）⇒ 账本（`lore/desk/`）与域册（`lore/library/`）里指向 `agents/task/<id>/report.md` 的指针会断；裁定与重议触发 = `lore/library/dispatch/facts/deletion-gc.md`
-- 旧 task 清理·两枚 widget 的分工：只读表 = 当前候选读数（空态只出表头 = 无可清理项，不是扫描失败）；橙色按钮 = 变更，点一次跑完整轮（分批入 delete-list → 等通道宽限 → reap → 核验），耗时 ≈ 宽限期 5 分钟 + 数十秒，期间每 60s 出一行进度
+- 旧 task 清理·两枚 widget 的分工：只读表 = 当前候选读数（空态只出表头 = 无可清理项，不是扫描失败）；橙色「清理旧任务」链接 = 变更，点一次跑完整轮（分批入 delete-list → 等通道宽限 → reap → 核验），耗时 ≈ 宽限期 5 分钟 + 数十秒，期间每 60s 出一行进度
 - 旧 task 清理·执行点恒为 GC hub：widget 命令在**浏览器所连的那台 w 服务**上执行，而删除只允许落在 hub 的权威树 ⇒ 非 hub 上点这个按钮会被拒绝（不写清单、不删）；hub 侧删除后各机副本由 agents-sync 的 pull 侧按清单自行收敛（不在按钮的等待窗内）
 
 </details>
@@ -63,8 +64,8 @@ ${python3 agent-platform/agentd/report.py -s topics}
 <details>
 <summary>旧任务清理（手动）</summary>
 
-${python3 dash/gc-tasks.py report}
+[刷新清理候选](<cmd:python3 dash/gc-tasks.py report>)
 
-${!python3 dash/gc-tasks.py run --yes}
+[清理旧任务](<cmd:!python3 dash/gc-tasks.py run --yes>)
 
 </details>
