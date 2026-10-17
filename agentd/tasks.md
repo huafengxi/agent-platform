@@ -7,36 +7,22 @@
 本页只引用、不写死政策取值（改保留期不产生本仓 diff）。
 -->
 
-## 异常与阻塞
+## [异常与阻塞](<cmd:python3 agent-platform/agentd/report.py -s abnormal>)
 
-[刷新异常与阻塞](<cmd:python3 agent-platform/agentd/report.py -s abnormal>)
+## [未终态任务](<cmd:python3 agent-platform/agentd/report.py -s active>)
 
-## 未终态任务
-
-[刷新未终态任务](<cmd:python3 agent-platform/agentd/report.py -s active>)
-
-## 最近终态
-
-[刷新最近终态](<cmd:python3 agent-platform/agentd/report.py -s recent>)
+## [最近终态](<cmd:python3 agent-platform/agentd/report.py -s recent>)
 
 <details>
 <summary>基础设施与状态统计</summary>
 
-## 基础设施健康
+## [基础设施健康](<cmd:python3 agent-platform/agentd/report.py -s system>)
 
-[刷新基础设施健康](<cmd:python3 agent-platform/agentd/report.py -s system>)
+## [状态统计](<cmd:python3 agent-platform/agentd/report.py -s stats>)
 
-## 状态统计
+## [bot 状态](<cmd:python3 agent-platform/agentd/report.py -s bots>)
 
-[刷新状态统计](<cmd:python3 agent-platform/agentd/report.py -s stats>)
-
-## bot 状态
-
-[刷新 bot 状态](<cmd:python3 agent-platform/agentd/report.py -s bots>)
-
-## topic
-
-[刷新 topic](<cmd:python3 agent-platform/agentd/report.py -s topics>)
+## [topic](<cmd:python3 agent-platform/agentd/report.py -s topics>)
 
 </details>
 
@@ -64,7 +50,7 @@
 <details>
 <summary>旧任务清理（手动）</summary>
 
-[刷新清理候选](<cmd:python3 dash/gc-tasks.py report>)
+### [清理候选](<cmd:python3 dash/gc-tasks.py report>)
 
 [清理旧任务](<cmd:!python3 dash/gc-tasks.py run --yes>)
 
