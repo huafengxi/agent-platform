@@ -9,7 +9,7 @@
 
 ## [异常与阻塞](<cmd:python3 agent-platform/agentd/report.py -s abnormal>)
 
-## [未终态任务](<cmd:python3 agent-platform/agentd/report.py -s active>)
+## [未结束任务](<cmd:python3 agent-platform/agentd/report.py -s active>)
 
 ## [最近终态](<cmd:python3 agent-platform/agentd/report.py -s recent>)
 
@@ -42,7 +42,7 @@
 - 调度基础设施健康度（口径）：runner 判活 = `agents/run/agentd.<host>.lock` 的 updatedAt 新鲜度，阈值取 `scheduler.HOST_ALIVE_THRESHOLD`（当前 60s，复用调度门禁判活口径）；agents-sync 链路为间接口径——远端锁由远端 runner 写、经同步链路到达 dev，内容新鲜即同时证明「远端 runner 活 + 同步链路通」（✅ 双活）；dev 为 hub 无本地同步链路
 - 失败/心跳停滞/应跑未跑/基础设施异常集中区：无异常时一行「（无异常）」
 - task/bot 两族状态计数（口径）：bot 族为常驻进程，无成败语义，终态多为被停用/一次跑完；明细见「bot 族常驻/一次性进程状态」节
-- 未终态任务：运行中 + 排队/已放行待拉起，含当前工具、调度依赖与最新进展
+- 未结束任务：运行中 + 排队/已放行待拉起，含当前工具、调度依赖与最新进展
 - 当前工具为本代会话落盘分支中“已发出、尚未记录结果”的工具名；按 toolCallId 配对，有多个则并列。括号是距调用记录的时长，不是执行耗时，可能排队或异常遗留，不证明正在执行/已确认等答。`-` 为无本代未返回调用或不采集，「不可得」为会话/代际/完整分支无法核实。同步延迟、未落盘的内存分支/会话切换不可见；只读采集范围与有界降级口径见 `agentd/README.md`「报表」节，不展示参数/问题正文、不扫描信箱
 - 会话观测链接：任务表的 taskId/名称两格（活跃、最近完成、终态三表）本身即该会话的 `?v=chat` 聊天观测面链接（带 /<host>/ 机器前缀，跨机经反代路由）；点击在新标签页打开（渲染页 `<base target="_blank">`）；运行中=直播+可介入，终态=复活续聊。活跃表原独立「会话」列（`[观测](…)`）已删——与 taskId/名称同链，三处冗余；其余各表本就无独立「会话/观测」列
 - bot 族常驻/一次性进程状态：auto/one-shot 语义区分；常驻进程无成败语义——restartPolicy=auto 的 final 通常为被停用/意外死亡（非完成）；pi-rpc-wrap 会话型 bot（`bot/<名>`）的 bot 名/用途名同样可点击弹出 `?v=chat` 观测窗，脚本型 bot 与转发器无会话故保持纯文本（族别名单住工作区的声明面，本仓不复述）；异常见异常集中区（文案带族别）
