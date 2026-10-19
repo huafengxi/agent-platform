@@ -22,6 +22,7 @@ anchors:
 | `gc.py` / `test_gc.py` | agents/ 删除传播（gc 机制）及其单测 |
 | `test_protect.py` | 本地属组不可读或原件路径无法安全编码时，整轮 pull 拒绝，避免保护清单缺项 |
 | `test_pull_manifest.py` / `bench_pull_manifest.py` | 大保护集、精确清单及真实 rsync 边界回归；22 万原件合成树性能实验（仅自建临时树） |
+| `test_minimal_tree.py` | 最小树闭包、完整描述对照、只读父目录更新、implied-dir 属组和可选真实 SSH 接收校验回归（仅自建临时树） |
 | `test_watch.py` | `watch` 的触发模型、属组闸门传输不变量、同步面排除管道（生产排除面为空）与消费侧铁律的单测（合成树，只用 /tmp） |
 | `replica-tag.py` / `test_replica_tag.py` | 副本标记工具（跨机同步的属组闸门辅助；纯手动一次性工具，不在 agents-sync 服务调用链内）及其单测。归属规则（各族/各文件的 owner = 哪台机器）权威 = 脚本 docstring：信封按 `from` 解宿主、共享信箱的命名空间 ack 按订阅者 `spec.host` 解、`enable.json` 归调度方、解不出一律 UNKNOWN = 不打标 |
 | `mac-rsync-patch/` | mac rsync 补丁（子目录自带 README） |
@@ -50,7 +51,7 @@ anchors:
 
 1. 每轮用 SSH `python3` / `scandir` 遍历 hub 全树，输出 NUL 分隔清单；包含目录（含空目录）、普通文件、symlink 和特殊文件，但不跟随 symlink。SSH/扫描非零、超时或不完整清单一律整轮失败，不拿部分结果传输。
 2. 本地重新扫描属组：未标记的普通文件、symlink（含目录链接）和特殊文件都是原件；真实目录不带原件闸门状态。扫描/属组失败则整轮拒绝，仅本地已消失文件可跳过。原件和 GC 条目用 hash 集合，按每个远端路径的祖先查找：原件在 sender 恰为目录时，其整个子树也不接收；GC 目录前缀及同名类型冲突也不接收。`WATCH_EXCLUDES` 的后缀/glob 按路径或 basename 任意深度匹配，被排除目录的子树不传。复杂度由路径长度和排序决定，不再按原件数 × sender 条目数匹配 glob。
-3. 只向 rsync 送 `--files-from=- --from0 --no-recursive --dirs` 的精确相对路径；**目录名不带尾斜杠**（`dir/` 即使在 no-recursive 下也会展开直接子项）。未列目录不能递归绕过过滤。保留 `-c`、`--chown=:replica`、无 `--delete`；空清单也执行成功轮次后的 GC 对账。
+3. 筛选结束后用 `minimal_pull_tree` 只保留不被已选后代涵盖的极大路径，再用一次 `--files-from=- --from0 --no-recursive --dirs` 发送。rsync 默认的 relative/implied-dir 语义携带省略的父目录及属性；空叶目录仍显式发送。最小描述与完整已筛选清单的祖先闭包相同，不缩小同步面、不拆批、不关闭原生 sender 校验。必须先保护筛选再化简，避免已受保护后代使仍应传输的父目录丢失。**目录名不带尾斜杠**（`dir/` 即使在 no-recursive 下也会展开直接子项）。未列目录不能递归绕过过滤。保留 `-c`、`--chown=:replica`、无 `--delete`；空清单也执行成功轮次后的 GC 对账。
 4. 传输清单与原件 hash 保护中的 `*?[]` 按字面路径处理，不作模式匹配；历史信封/ack 中的方括号无需改名或排除。此边界与 GC 删除授权独立，GC 的 `GLOB_UNSAFE` 禁名契约不变。不做路径规范化：绝对路径、空/`.`/`..` 分量、分量首尾空白、反斜杠、不可打印字符（含 newline、Unicode 行分隔符）和非 UTF-8 名字均整轮拒绝，避免清单寻址或落地打标歧义。GC 条目有效性仍只按 `delete_contract.py` 裁定；pull 前不可读清单使该轮失败（缺少整个 gc/ 目录视为空）。新收到的删除清单仍在成功传输后重读、执行；`#FORCED:` 和保护资产边界不变。
 5. sender 文件在扫描后消失等导致 rsync 非零，该轮失败且不执行 GC，下一轮完整重锚定，无候选状态要修复。两次扫描不构成文件系统快照，原有单写者/原子 rename 协议与下轮重试约束不变。
 
@@ -86,6 +87,8 @@ agents-sync/ssh-sync.py push ./a dev:/b --dry-run   # host 来自 env/.live/ssh-
 agents-sync/ssh-sync.py --help
 python3 agents-sync/test_watch.py                   # 触发模型/闸门/排除管道/铁律单测（合成树，/tmp）
 python3 agents-sync/test_pull_manifest.py           # 大保护集及真实 rsync 精确清单边界（/tmp）
+python3 agents-sync/test_minimal_tree.py            # 最小树描述/完整树对照（/tmp）
+# SSH_SYNC_TEST_HOST 设为本机 SSH 别名时，另跑真实远端 sender 校验路径；不填则只跳过该项
 python3 agents-sync/bench_pull_manifest.py          # 22 万原件/22.3 万 sender 文件性能实验（/tmp）
 python3 agents-sync/gc.py list                      # 只读：清单 + schedule + 未排程残留（在 hub 上跑）
 python3 agents-sync/test_gc.py                      # gc 机制单测（合成树，/tmp）
