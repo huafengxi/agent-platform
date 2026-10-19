@@ -10,7 +10,7 @@ Covers:
 + T1 ``ChangeSignal`` + ``cycle_trigger`` — the entire trigger model
   (first-event debounce window; the forced deadline is the completeness
   bound and is evaluated before any pending-event check)
-+ T2 ``unmarked_files`` — the push whitelist AND the pull protect source
++ T2 ``unmarked_files`` — the push whitelist and pull protection scan
 + T3 ``WATCH_EXCLUDES`` is EMPTY (the receiver's in-flight ledger moved
   into process memory ⇒ nothing on disk is writer-local any more) and the
   exclusion plumbing still works: a re-added pattern drops the name at any
@@ -273,9 +273,9 @@ class _R:
     """rsync that 'transferred' two files (plus header/summary noise)."""
     returncode = 0
     stdout = ("sending incremental file list\n"
-              "mine/new.txt\n"
-              "mine/keep.txt\n"
-              "newdir/\n"
+              "SSH_SYNC mine/new.txt\n"
+              "SSH_SYNC mine/keep.txt\n"
+              "SSH_SYNC newdir/\n"
               "\n"
               "sent 100 bytes  received 20 bytes  400.00 bytes/sec\n"
               "total size is 10  speedup is 0.08\n")
@@ -298,6 +298,10 @@ if gate_usable() and can_chgrp(cw):
 
     real_run, real_sub = ss.run, ss.subprocess.run
     real_apply = ss.apply_gc_deletions
+    real_manifest = ss.remote_manifest
+    ss.remote_manifest = lambda *a: ['mine', 'mine/keep.txt', 'mine/new.txt',
+                                   'rep.txt', 'gone', 'gone/inner.txt',
+                                   'newdir', 'fresh.txt']
     ss.run, ss.subprocess.run = fake_run, fake_sub
     ss.apply_gc_deletions = lambda d: gc_calls.append(d) or 0
     try:
@@ -340,23 +344,22 @@ if gate_usable() and can_chgrp(cw):
         ok, n = ss.watch_rsync("CFG", "dev", cw, "/hub", args_ns(), "pull",
                                REPLICA_GID)
         rs = [c for c in calls if c[0] == "rsync"][0]
-        pats = rs[2].splitlines()
-        check("pull: protect entries are ANCHORED at the transfer root",
-              "/mine/keep.txt" in pats and "/mine/new.txt" in pats
-              and "mine/keep.txt" not in pats, pats)
-        check("pull: a replica of mine is NOT protected (it may be updated)",
-              "/rep.txt" not in pats, pats)
-        check("pull: gc delete-list subtree pattern present",
-              "/gone/" in pats, pats)
-        check("pull: no wildcard reached --exclude-from (protect entries "
-              "are anchored paths; WATCH_EXCLUDES is empty ⇒ a glob could "
-              "only come from a corrupted protect entry, which is refused)",
-              ss.WATCH_EXCLUDES == []
-              and not any(set(p) & ss.GLOB_UNSAFE for p in pats), pats)
-        check("pull: --exclude-from, no --files-from, never --delete",
-              "--exclude-from=-" in rs[2 - 1]
-              and "--files-from" not in " ".join(rs[1])
-              and "--delete" not in rs[1], rs[1])
+        listed = [p for p in rs[2].split('\0') if p]
+        check("pull: originals are absent from the exact file list",
+              'mine/keep.txt' not in listed and 'mine/new.txt' not in listed,
+              listed)
+        check("pull: a replica may be updated and a new file may arrive",
+              'rep.txt' in listed and 'fresh.txt' in listed, listed)
+        check("pull: gc blocks both the named directory and descendants",
+              'gone' not in listed and 'gone/inner.txt' not in listed, listed)
+        check("pull: directory entries cannot expand omitted children",
+              'mine' in listed and not any(p.endswith('/') for p in listed),
+              listed)
+        check("pull: NUL exact files, no recursion, never --delete",
+              all(f in rs[1] for f in ('--files-from=-', '--from0',
+                                      '--no-recursive', '--dirs'))
+              and '--exclude-from=-' not in rs[1]
+              and '--delete' not in rs[1], rs[1])
         check("pull: gc deletions converge after a successful transfer",
               gc_calls == [cw], gc_calls)
         check("pull: no per-cycle remote mkdir on the pull side",
@@ -389,6 +392,7 @@ if gate_usable() and can_chgrp(cw):
     finally:
         ss.run, ss.subprocess.run = real_run, real_sub
         ss.apply_gc_deletions = real_apply
+        ss.remote_manifest = real_manifest
 else:
     skip("watch_rsync construction tests", "no replica group membership")
 
@@ -426,13 +430,22 @@ if gate_usable() and can_chgrp(mktmp("probe")):
     check("real transport: my own replica was NOT pushed back",
           not os.path.exists(os.path.join(hub, "rep.txt")))
 
-    protect, _ = ss.unmarked_files(node, REPLICA_GID, ss.WATCH_EXCLUDES)
-    gc_ex, _, _ = ss.gc_exclude_and_targets(node)
-    stdin = "".join(p + "\n" for p in
-                    ["/" + x for x in protect] + gc_ex + ss.WATCH_EXCLUDES)
+    def pull_list():
+        scan = subprocess.run([sys.executable, '-c', ss.REMOTE_PY_MANIFEST, hub],
+                              stdout=subprocess.PIPE, check=True)
+        manifest = [os.fsdecode(p).rstrip('/')
+                    for p in scan.stdout.split(b'\0') if p]
+        protect, ok = ss.unmarked_files(node, REPLICA_GID,
+                                        protect_nonregular=True)
+        assert ok
+        gc_ex, _, _ = ss.gc_exclude_and_targets(node)
+        return ''.join(p + '\0' for p in ss.pull_files(
+            manifest, protect, gc_ex, ss.WATCH_EXCLUDES))
+
+    stdin = pull_list()
     r = rsync_local(ss.WATCH_RSYNC_FLAGS,
-                    ["--exclude-from=-", f"--chown=:{ss.REPLICA_GROUP}"],
-                    hub, node, stdin)
+                    ['--files-from=-', '--from0', '--no-recursive', '--dirs',
+                     f'--chown=:{ss.REPLICA_GROUP}'], hub, node, stdin)
     check("real transport: pull exit 0", r.returncode == 0, r.stdout[-400:])
     check("INVARIANT a local original is NEVER overwritten by a pull",
           read(node, "shared.txt") == "NODE_ORIGINAL",
@@ -451,11 +464,9 @@ if gate_usable() and can_chgrp(mktmp("probe")):
     # the accident class of a flag that rewrites every candidate.
     st0 = os.stat(os.path.join(node, "fresh.txt"))
     time.sleep(0.05)
-    protect, _ = ss.unmarked_files(node, REPLICA_GID, ss.WATCH_EXCLUDES)
-    stdin = "".join("/" + p + "\n" for p in protect)
     r = rsync_local(ss.WATCH_RSYNC_FLAGS,
-                    ["--exclude-from=-", f"--chown=:{ss.REPLICA_GROUP}"],
-                    hub, node, stdin)
+                    ['--files-from=-', '--from0', '--no-recursive', '--dirs',
+                     f'--chown=:{ss.REPLICA_GROUP}'], hub, node, pull_list())
     st1 = os.stat(os.path.join(node, "fresh.txt"))
     check("INVARIANT a byte-identical replica is not rewritten "
           "(same inode, same mtime)",
@@ -493,10 +504,19 @@ except SyntaxError as e:
     check("the remote event script is valid Python", False, e)
 
 try:
-    import inotify_simple  # noqa: F401
-    HAVE_INO = True
-except ImportError:
+    import inotify_simple
+    # Importability alone does not prove the host has any watch quota left.
+    # Probe only a self-created fixture, never tune sysctl or production watches.
+    probe = inotify_simple.INotify()
+    try:
+        probe.add_watch(mktmp('inotify-probe'), inotify_simple.flags.CREATE)
+        HAVE_INO = True
+        INO_REASON = ''
+    finally:
+        probe.close()
+except (ImportError, OSError) as e:
     HAVE_INO = False
+    INO_REASON = str(e)
 
 def read_lines(stream, seconds):
     """Every line a stream produces within ``seconds``.
@@ -592,7 +612,7 @@ if HAVE_INO:
         ss._STOP = real_stop
         ss._LOCAL_SIG.take()
 else:
-    skip("live detector tests", "inotify_simple not installed here")
+    skip('live detector tests', 'inotify unavailable: ' + INO_REASON)
 
 # ------------------------------------- T9 consumer-side iron rules
 print("== T9 consumer-side iron rules + refusal throttle ==")

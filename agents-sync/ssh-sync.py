@@ -33,10 +33,16 @@ Both pipelines encode file ORIGIN in group metadata:
     find <local> ! -group replica -type f  ->  rsync -rlptDvc \
         --files-from=- --from0 --chown=:replica <local>/ <host>:<remote>/
 
-+ pull (blacklist — fetch everything I did NOT write, mark replicas)::
++ pull (fresh full-tree manifest, filtered before rsync)::
 
-    protect list = local files NOT in replica  ->  rsync -rlptDvc \
-        --exclude-from=- --chown=:replica <host>:<remote>/ <local>/
+    SSH python3 scandir hub -> NUL manifest (never follows symlinks)
+    hash/ancestor filter: remove local originals + GC + WATCH_EXCLUDES
+    rsync -rlptDvc --files-from=- --from0 --no-recursive --dirs \
+        --chown=:replica <host>:<remote>/ <local>/
+
+  Every cycle rebuilds both scans. This is NOT a persistent candidate ledger.
+  Unlike N original-path exclude patterns matched against M sender entries,
+  hash membership does not make rsync perform N*M glob comparisons.
 
 Rules, point by point:
 
@@ -60,20 +66,31 @@ Rules, point by point:
    directions by construction (each machine writes its own: unmarked
    locally → pushed, and protected on pull). ``session/`` travels like
    any other subtree.
-5. Both lists travel via stdin (``--files-from=-`` / ``--exclude-from=-``);
-   no temp files. Protect and gc entries are ANCHORED (``/rel``, ``/rel/``)
-   so a slashless pattern cannot match on basename elsewhere in the tree.
-6. Failure is ASYMMETRIC: an unmarked file is never overwritten (worst
-   case = a stale replica lingers, never data loss), and every protected
-   or refused path is logged ("why didn't it sync? → it is unmarked here").
-7. Protect-list paths containing ``*?[`` or a newline abort the pull:
-   omitting an original would expose it to overwrite. Unreadable ownership
-   also aborts the cycle; only a file that vanished during the walk is skipped.
-   Malformed gc-list entries are refused individually and logged.
+5. Both transfer lists travel via stdin (``--files-from=- --from0``),
+   with no temp files. Pull sends exact root-relative paths, including empty
+   directories, WITHOUT trailing slashes: ``dir/`` expands immediate children
+   even with ``--no-recursive``. No unlisted directory may recurse. Local
+   originals and GC entries block exact paths AND sender descendants; a local
+   original file is safe even when the sender has a directory at that path.
+6. Failure is ASYMMETRIC: unmarked originals are never selected for overwrite;
+   a failure may leave stale replicas, never an intentionally omitted original.
+   Pull protects unmarked symlinks and special files too (push still ships
+   regular originals only). Real directories carry no group-gate state.
+7. Local ownership/walk failures, unreadable GC lists, failed/partial SSH hub
+   scans and unsafe manifest names abort pull BEFORE rsync. Missing gc/ means
+   no lists; a vanished local file is harmless and skipped. The existing
+   no-``*?[``/newline path convention remains; backslashes, control bytes,
+   non-UTF8 names, absolute/empty/dot/dot-dot components and component-edge
+   whitespace and non-printing Unicode are refused rather than normalized
+   (post-pull marking must have unambiguous names). Malformed GC entries are still refused
+   individually using the shared deletion contract. Scanner/transfer timeout
+   stays 600s; nonzero rsync (including vanished sender files) fails the cycle.
+   Neither scan is a filesystem snapshot; the existing single-writer/atomic
+   rename discipline and next full cycle handle changes racing selection.
 8. GC delete-list: deletions do not propagate through a no---delete mesh,
    so the hub-side GC tool (``agents-sync/gc.py``, run on the hub only) publishes
    cumulative lists at ``gc/delete-list.<seq>``. The PULL side unions every
-   local list into the exclude stream (listed paths are never received
+   local list into the receive filter (listed paths are never received
    again) and, after each successful transfer, DELETES local copies of
    every listed path (including unmarked node originals — that closes the
    only resurrection window). Idempotent and replayable. The push side is
@@ -112,8 +129,8 @@ remote program in BOTH pipeline directions).
 Cycle model
 =======================================================================
 Detectors answer ONE question — "did anything change?" — and never decide
-what may be shipped. There are no snapshots, no candidate lists and no
-per-path bookkeeping anywhere in the link:
+what may be shipped. There are no snapshots, persistent candidate lists or
+cross-cycle per-path bookkeeping anywhere in the link (only fresh full scans):
 
 + ONE loop per link; a cycle = one whole-tree push followed by one
   whole-tree pull. rsync's own ``-c`` comparison decides what moves, so a
@@ -122,10 +139,10 @@ per-path bookkeeping anywhere in the link:
   seconds, or when ``--interval`` seconds have passed since the last cycle.
   The deadline is ITSELF a trigger and is evaluated before any
   short-circuit, so a completely quiet tree still re-anchors every
-  ``--interval`` seconds: that deadline is the completeness bound, and it
-  holds whatever the detectors did (dead stream, inotify overflow, no local
-  backend at all). FIRST-event debounce window: the timestamp is taken when
-  nothing is pending and later events only bump a count, so under
+  ``--interval`` seconds, plus any in-flight cycle time: the deadline
+  bounds idle scheduling regardless of detectors (dead stream, inotify
+  overflow, no local backend). FIRST-event debounce window: the timestamp
+  is taken when nothing is pending and later events only bump a count, so under
   continuous churn a cycle still fires within ``--debounce`` of the first
   event (a last-event window would starve forever);
 + ``--min-cycle`` is the rate floor between two cycles (a whole-tree pair
@@ -161,7 +178,7 @@ session jsonl), so there is nothing left to exclude. ``*.msg`` envelopes
 and final ``ack/<id>`` files sync exactly as before.
 
 The plumbing stays (the constant, the detector filter and the pull
-``--exclude-from`` slot) because it is generic: re-adding an exclusion is
+manifest ancestor filter) because it is generic: re-adding an exclusion is
 one list entry, and it still has NO runtime switch — sync-face exclusions
 are safety semantics, not a performance knob. Stale ``*.pending`` files
 left behind by the old implementation are harmless (protocol §15.4: nobody
@@ -275,10 +292,6 @@ REPLICA_GROUP = "replica"
 # when the bytes are identical, which at mesh scale floods the detectors
 # and turns every cycle into a whole-mesh rewrite.
 WATCH_RSYNC_FLAGS = "-rlptDvc"
-# Characters that would turn a protect-list entry into a wildcard
-# (rsync exclude patterns are glob semantics); newline would split one
-# entry into two patterns.
-
 
 # Sync-face exclusions (watch mode; the only ones next to the gc
 # delete-list). EMPTY: the single pattern this list used to carry
@@ -292,10 +305,10 @@ WATCH_EXCLUDES: list = []
 
 # Cycle cadence (see the module docstring "Cycle model"):
 # + DEBOUNCE — first-event window before a detected change fires a cycle;
-# + MIN_CYCLE — rate floor between two cycles (a whole-tree pair is ~1 s);
-# + INTERVAL — forced cadence AND the completeness bound: a cycle runs at
-#   least this often even on a tree with no events at all, which is what
-#   re-anchors anything the detectors missed;
+# + MIN_CYCLE — rate floor between two cycles (cost depends on tree size);
+# + INTERVAL — forced cadence: a cycle runs on the deadline even with no
+#   events (plus in-flight transfer time),
+#   which re-anchors anything the detectors missed;
 # + STATS_EVERY — cadence of the counter summary line.
 DEFAULT_DEBOUNCE = 0.5
 DEFAULT_MIN_CYCLE = 3.0
@@ -336,20 +349,25 @@ _WATCH_REMOTE_RSYNC_OPTS = []
 # A short-lived CLI (gc.py) reports per call instead.
 GC_REFUSE_REPORT_GAP = 300.0
 _gc_refuse_reported = [0.0, 0]     # [last report ts, suppressed since then]
-def read_gc_lists(local_dir):
+def read_gc_lists(local_dir, strict=False):
     """Union of entries across all <local>/gc/delete-list.* files, in
     first-seen order (set semantics; duplicates absorbed). Each item
     is a (entry, forced) pair: forced = the line carried the
     GC_FORCE_MARK audit marker; across duplicate listings of the same
     path the marker wins (forced supersedes unmarked — same semantics
     as the hub-side list compression). Unreadable files are skipped
-    best-effort (lists are written atomically by agents-sync/gc.py;
-    the next cycle retries)."""
+    best-effort by default. Pull uses strict=True: unreadable/vanished
+    lists abort before transfer, never silently weaken receive filtering.
+    A missing gc directory is the normal empty-list case."""
     gcdir = os.path.join(local_dir, GC_DIR_NAME)
     try:
         names = sorted(f for f in os.listdir(gcdir)
                        if f.startswith(GC_LIST_PREFIX))
+    except FileNotFoundError:
+        return []
     except OSError:
+        if strict:
+            raise
         return []
     order = []
     forced = {}
@@ -368,6 +386,8 @@ def read_gc_lists(local_dir):
                     elif mark:
                         forced[e] = True
         except OSError:
+            if strict:
+                raise
             continue
     return [(e, forced[e]) for e in order]
 
@@ -397,7 +417,7 @@ def _gc_report_refusals(refused):
          f"is agents-sync/gc.py): {refused[:5]}")
 
 
-def gc_exclude_and_targets(local_dir):
+def gc_exclude_and_targets(local_dir, strict=False):
     """Split delete-list entries into (exclude_patterns, targets,
     refused). exclude_patterns are anchored rsync exclude patterns
     ('/rel' for files, '/rel/' for directory subtrees); targets are
@@ -406,7 +426,7 @@ def gc_exclude_and_targets(local_dir):
     hub-side ONLY by agents-sync/gc.py validate_entry — single point of
     generation and validation). Entries are refused ONLY when
     structurally malformed (absolute paths, '..' elements, glob
-    metacharacters — same defense as the pull protect list, these would
+    metacharacters — the existing wire path convention, these would
     corrupt rsync pattern semantics), when they name a bare family
     container (one such line would rmtree a whole clan on every node),
     when they touch ``gc/`` internals (the sync layer's own gc/ tree is
@@ -418,7 +438,7 @@ def gc_exclude_and_targets(local_dir):
     authorization and MUST be applied here, otherwise the node copies
     survive and push back, resurrecting what the hub deleted)."""
     excludes, targets, refused = [], [], []
-    for e, forced in read_gc_lists(local_dir):
+    for e, forced in read_gc_lists(local_dir, strict=strict):
         raw = e.rstrip("/")
         is_dir = e.endswith("/")
         if _gc_shape_refused(raw, is_dir, forced):
@@ -601,15 +621,16 @@ def probe_replica_membership(local_dir, replica_gid):
             f"in a fresh login session).")
 
 
-def unmarked_files(local_dir, replica_gid, excludes=()):
+def unmarked_files(local_dir, replica_gid, excludes=(), protect_nonregular=False):
     """(relpaths, ok): regular files of local_dir whose group is NOT
     replica — the local ORIGINALS. ok=False if the walk hit an error;
     callers must abort the cycle rather than act on a partial list
     (a truncated pull protect list could expose originals).
     ``excludes`` drops sync-face-excluded names — the
-    watch link passes WATCH_EXCLUDES (currently empty) so an excluded
-    name is neither a push candidate nor a pull-protect entry (it is
-    never received, so protecting it is moot)."""
+    watch link passes WATCH_EXCLUDES (currently empty). Pull also passes
+    protect_nonregular=True: unmarked symlinks (including directory links)
+    and special files need the same protection as regular originals.
+    Real directories carry no ownership gate state."""
     out = []
     errors = []
 
@@ -617,7 +638,7 @@ def unmarked_files(local_dir, replica_gid, excludes=()):
         errors.append(e)
 
     for root, dirs, files in os.walk(local_dir, onerror=onerror):
-        for fn in files:
+        for fn in files + (dirs if protect_nonregular else []):
             p = os.path.join(root, fn)
             rel = os.path.relpath(p, local_dir)
             if excludes and _excluded(rel, excludes):
@@ -629,7 +650,8 @@ def unmarked_files(local_dir, replica_gid, excludes=()):
             except OSError as e:
                 errors.append(e)  # Unknown ownership cannot be omitted safely.
                 continue
-            if not statmod.S_ISREG(st.st_mode):
+            if statmod.S_ISDIR(st.st_mode) or (
+                    not protect_nonregular and not statmod.S_ISREG(st.st_mode)):
                 continue
             if st.st_gid != replica_gid:
                 out.append(rel)
@@ -749,6 +771,89 @@ def _excluded(relpath, patterns):
             return True
     return False
 
+# Emit paths as NUL records, directories with a trailing slash as a TYPE
+# marker only. Never follow symlinks. Any scan error makes ssh non-zero;
+# the caller discards ALL output rather than using a partial manifest.
+REMOTE_PY_MANIFEST = r"""
+import os, sys
+root = os.fsencode(sys.argv[1])
+stack = [(root, b'')]
+while stack:
+    directory, prefix = stack.pop()
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            rel = prefix + entry.name
+            try:
+                isdir = entry.is_dir(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            sys.stdout.buffer.write(rel + (b'/\0' if isdir else b'\0'))
+            if isdir:
+                stack.append((entry.path, rel + b'/'))
+"""
+
+
+def _safe_manifest_path(rel):
+    """Conservative wire/output names; never let rsync normalize traversal.
+
+    Keep the existing no-glob/newline layout contract. Backslash/control
+    bytes and non-UTF8 names are also refused (rsync -v escapes them, which
+    would make post-transfer marking ambiguous). Fail closed, not skip.
+    """
+    return (bool(rel) and all(p not in ('', '.', '..') and p == p.strip()
+                             for p in rel.split('/'))
+            and not any(c in GLOB_UNSAFE or c == '\\'
+                        or not c.isprintable() for c in rel))
+
+
+def remote_manifest(cfg, host, remote_dir):
+    """Fresh full hub listing; nonzero/timeout/malformed output aborts pull."""
+    command = ('python3 -c ' + shlex.quote(REMOTE_PY_MANIFEST) + ' '
+               + shlex.quote(remote_dir))
+    r = subprocess.run(['ssh', '-F', cfg] + SSH_TIMEOUT_OPTS + [host, command],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+    if r.returncode:
+        raise OSError(f'hub scan failed (ssh exit {r.returncode}): '
+                      + os.fsdecode(r.stderr[-300:]))
+    data = r.stdout
+    if data and not data.endswith(b'\0'):
+        raise ValueError('unterminated hub manifest')
+    paths = []
+    for raw in data.split(b'\0')[:-1]:
+        rel = os.fsdecode(raw)
+        # Strip exactly ONE directory type marker, never normalize paths.
+        path = rel[:-1] if rel.endswith('/') else rel
+        if not _safe_manifest_path(path):
+            raise ValueError(f'unsafe hub manifest path: {rel!r}')
+        paths.append(path)
+    return paths
+
+
+def pull_files(manifest, originals, gc_excludes, excludes=()):
+    """Hash/ancestor membership plus selected-path sorting, not N*M globs.
+
+    Both an original and a GC entry block their entire sender subtree even
+    when sender/receiver types differ. Excluded directories block children.
+    Directory entries have NO trailing slash: --files-from dir/ would expand
+    immediate children even under --no-recursive, bypassing the gate.
+    """
+    protected = set(originals)
+    blocked = {p.lstrip('/').rstrip('/') for p in gc_excludes}
+    selected = []
+    for rel in manifest:
+        if not _safe_manifest_path(rel):
+            raise ValueError(f'unsafe manifest path: {rel!r}')
+        parts = rel.split('/')
+        for i in range(1, len(parts) + 1):
+            ancestor = '/'.join(parts[:i])
+            if ancestor in protected or ancestor in blocked or (
+                    excludes and _excluded(ancestor, excludes)):
+                break
+        else:
+            selected.append(rel)
+    return sorted(selected)
+
+
 def _watch_ssh_e(cfg):
     return ["-e", " ".join(["ssh", "-F", shlex.quote(cfg)] + SSH_TIMEOUT_OPTS)]
 
@@ -761,27 +866,35 @@ def _watch_optional_flags(args):
         out += ["--bwlimit", str(args.bwlimit)]
     return out
 
-def _rsync_transferred(stdout):
+def _rsync_transferred(stdout, prefixed=False):
     """(files, dirs) named in rsync -v's OWN output — the authoritative
     record of what actually moved (a file list diff would mislabel: it
     cannot tell a protected original that merely EXISTS on both sides from
     one that was overwritten).
 
-    Header/summary/diagnostic lines are filtered by prefix; a name ending
-    in '/' is a created directory. Parsing limits: a filename containing a
-    newline would be split into two entries (the agents/ layout forbids
-    newlines and glob characters in names — the same convention the glob
-    defense relies on), and any stray line becomes a harmless lstat miss
-    below."""
+    Pull uses --out-format='SSH_SYNC %n' and --8-bit-output: only prefixed
+    records are consumed, symlink target text is not part of the name, and
+    diagnostics cannot accidentally mark a protected original. A trailing
+    slash denotes a directory. Unsafe/ambiguous pull names are refused at
+    scanning. Push retains its legacy -v output parser."""
     files, dirs = set(), set()
     for line in (stdout or "").splitlines():
+        if line.startswith('SSH_SYNC '):
+            line = line[len('SSH_SYNC '):]
+            if line.endswith('/'):
+                dirs.add(line.rstrip('/'))
+            elif line:
+                files.add(line)
+            continue
+        if prefixed:
+            continue  # Never mistake a diagnostic for a path to chgrp.
         line = line.strip()
         if not line:
             continue
         if line.endswith("/"):
             dirs.add(line.rstrip("/"))
             continue
-        if line.startswith(("sent ", "sending ", "received ", "total size",
+        if line.startswith(("sent ", "sending ", "received ", "receiving ", "total size",
                             "rsync", "building ", "delta-transmission ",
                             "Speedup", "cd++")):
             continue
@@ -793,15 +906,15 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
                 replica_gid):
     """Run ONE whole-tree group-gate transfer. Returns ``(ok, n_moved)``.
 
-    Both directions always negotiate the WHOLE tree — rsync's own content
-    checksums (``-c``) decide what moves — so a cycle is correct whatever
-    the detectors saw, and nothing here needs a candidate list:
+    Both directions scan the WHOLE tree anew; rsync's content checksums
+    (``-c``) decide what moves. Detectors never determine the selection:
 
-    + push: whitelist = every local regular file NOT marked ``replica``
-      (my originals) → ``--files-from=-``; lands marked on the receiver;
-    + pull: blacklist = my unmarked originals (protect) + gc delete-list +
-      ``WATCH_EXCLUDES`` (currently empty) → ``--exclude-from=-``;
-      everything else arrives and is marked ``replica``.
+    + push: every local regular file NOT marked ``replica`` (my originals)
+      → ``--files-from=-``; lands marked on the receiver;
+    + pull: fresh SSH hub manifest minus original/GC/exclusion ancestors
+      → NUL exact --files-from with --no-recursive --dirs. No per-original
+      rsync glob patterns, no persistent candidates, no directory expansion.
+      Transferred non-directory entries get no-follow replica marking.
 
     ``n_moved`` comes from rsync -v's own output, so a cycle that moved
     nothing is silent by construction. Any non-zero exit is a failure: the
@@ -842,50 +955,41 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
     else:
         src = f"{host}:{remote_dir.rstrip('/')}/"
         dst = local_dir.rstrip("/") + "/"
-        # GC delete-list: listed paths are NEVER received (anchored
-        # exclude patterns) and their local copies are deleted after the
-        # transfer (below).
-        gc_excludes, _gc_targets, _gc_refused = gc_exclude_and_targets(
-            local_dir)
-        # Protect list = my originals. A truncated one could expose them,
-        # so a walk error aborts the cycle instead of pulling.
-        unmarked, ok = unmarked_files(local_dir, replica_gid, WATCH_EXCLUDES)
-        if not ok:
-            wlog("error: pull: local walk failed; skipping this cycle "
-                 "(a truncated protect list could expose originals)")
-            _bump("errors")
+        try:
+            gc_excludes, _gc_targets, _gc_refused = gc_exclude_and_targets(
+                local_dir, strict=True)
+        except (OSError, ValueError) as e:
+            wlog(f'error: pull: GC list scan failed; skipping this cycle: {e}')
+            _bump('errors')
             return False, 0
-        protect, refused = [], []
-        for rel in unmarked:
-            if any(c in GLOB_UNSAFE for c in rel):
-                refused.append(rel)  # pattern semantics would corrupt it
-            else:
-                # A leading '/' anchors the pattern at the transfer root
-                # (an unanchored slashless entry would match on BASENAME
-                # anywhere in the tree).
-                protect.append("/" + rel)
-        if refused:
-            wlog(f"error: pull: cannot protect {len(refused)} local path(s) "
-                 f"with pattern chars; skipping this cycle: {refused[:5]}")
-            _bump("errors")
+        # No exclusion before ownership scanning: a failed scan must never
+        # silently omit an original, including a symlink or special file.
+        unmarked, ok = unmarked_files(local_dir, replica_gid,
+                                      protect_nonregular=True)
+        unsafe = next((p for p in unmarked if not _safe_manifest_path(p)), None)
+        if not ok or unsafe is not None:
+            wlog('error: pull: incomplete or unsafe local protection scan; '
+                 f'skipping this cycle (first unsafe path: {unsafe!r})')
+            _bump('errors')
             return False, 0
-        cmd = ([RSYNC_BIN, WATCH_RSYNC_FLAGS, "--exclude-from=-",
-                f"--chown=:{REPLICA_GROUP}"]
+        try:
+            files = pull_files(remote_manifest(cfg, host, remote_dir),
+                               unmarked, gc_excludes, WATCH_EXCLUDES)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+            wlog(f'error: pull: manifest failed; skipping this cycle: {e}')
+            _bump('errors')
+            return False, 0
+        cmd = ([RSYNC_BIN, WATCH_RSYNC_FLAGS, '--files-from=-', '--from0',
+                '--no-recursive', '--dirs', '--8-bit-output',
+                '--out-format=SSH_SYNC %n',
+                f'--chown=:{REPLICA_GROUP}']
                + _WATCH_REMOTE_RSYNC_OPTS
                + _watch_optional_flags(args) + _watch_ssh_e(cfg)
                + [src, dst])
-        # WATCH_EXCLUDES ride along as unanchored patterns (a pattern
-        # matches the basename at any depth). The list is currently empty;
-        # the slot stays so re-adding one is a single constant edit.
-        stdin = "".join(p + "\n"
-                        for p in protect + gc_excludes + WATCH_EXCLUDES)
+        stdin = ''.join(p + '\0' for p in files)
         if args.verbose:
-            wlog(f"pull: protecting {len(protect)} local original(s) from "
-                 f"overwrite"
-                 + (f" (e.g. {protect[:3]})" if protect else "")
-                 + (f"; excluding {len(gc_excludes)} gc delete-list "
-                    f"path(s)" if gc_excludes else "")
-                 + f"; excluding {WATCH_EXCLUDES}")
+            wlog(f'pull: {len(unmarked)} protected originals; '
+                 f'{len(files)} exact hub entries selected')
 
     _bump(f"{direction}_cycles")
     try:
@@ -902,7 +1006,7 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
         _bump("errors")
         return False, 0
 
-    moved, moved_dirs = _rsync_transferred(r.stdout)
+    moved, moved_dirs = _rsync_transferred(r.stdout, prefixed=direction == 'pull')
     if direction == "pull":
         # Marking fix-up: --chown=:replica is SILENTLY IGNORED by some
         # rsync builds (observed: brew rsync 3.5.0 on macOS ignores both
@@ -911,8 +1015,9 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
         # pull side would protect the whole tree (existing files would
         # never update again) — the group gate would be effectively off. An
         # idempotent local chgrp of exactly the TRANSFERRED files is the
-        # authoritative marking. On receivers where --chown works this walk
-        # finds nothing to do.
+        # authoritative marking (including symlinks/specials, without ever
+        # following a symlink target). On receivers where --chown works
+        # this walk finds nothing to do.
         fixed = 0
         for rel in moved:
             p = os.path.join(local_dir, rel)
@@ -920,10 +1025,10 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
                 st = os.lstat(p)
             except OSError:
                 continue
-            if not statmod.S_ISREG(st.st_mode) or st.st_gid == replica_gid:
+            if statmod.S_ISDIR(st.st_mode) or st.st_gid == replica_gid:
                 continue
             try:
-                os.chown(p, -1, replica_gid)
+                os.chown(p, -1, replica_gid, follow_symlinks=False)
                 fixed += 1
             except OSError:
                 pass  # best-effort; the next cycle retries
