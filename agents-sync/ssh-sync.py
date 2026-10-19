@@ -78,11 +78,13 @@ Rules, point by point:
    regular originals only). Real directories carry no group-gate state.
 7. Local ownership/walk failures, unreadable GC lists, failed/partial SSH hub
    scans and unsafe manifest names abort pull BEFORE rsync. Missing gc/ means
-   no lists; a vanished local file is harmless and skipped. The existing
-   no-``*?[``/newline path convention remains; backslashes, control bytes,
-   non-UTF8 names, absolute/empty/dot/dot-dot components and component-edge
-   whitespace and non-printing Unicode are refused rather than normalized
-   (post-pull marking must have unambiguous names). Malformed GC entries are still refused
+   no lists; a vanished local file is harmless and skipped. Glob characters
+   (``*?[]``) are literal names in the NUL files-from list and hash protection
+   set, NOT patterns. Backslashes, control bytes (including newline), non-UTF8
+   names, absolute/empty/dot/dot-dot components, component-edge whitespace and
+   non-printing Unicode are refused rather than normalized (post-pull marking
+   must have unambiguous names). GC keeps its separate GLOB_UNSAFE contract;
+   malformed GC entries are still refused
    individually using the shared deletion contract. Scanner/transfer timeout
    stays 600s; nonzero rsync (including vanished sender files) fails the cycle.
    Neither scan is a filesystem snapshot; the existing single-writer/atomic
@@ -246,7 +248,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from platform_paths import workspace_root
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from delete_contract import (GC_DIR_NAME, LIST_PREFIX as GC_LIST_PREFIX,
-                             FORCE_MARK as GC_FORCE_MARK, GLOB_UNSAFE,
+                             FORCE_MARK as GC_FORCE_MARK,
                              BARE_FAMILY_ENTRIES as GC_BARE_FAMILY_ENTRIES,
                              PROTECTED_SYSTEM_PATHS as GC_PROTECTED_PATHS,
                              split_force, validate_path as validate_delete_path)
@@ -418,16 +420,16 @@ def _gc_report_refusals(refused):
 
 
 def gc_exclude_and_targets(local_dir, strict=False):
-    """Split delete-list entries into (exclude_patterns, targets,
-    refused). exclude_patterns are anchored rsync exclude patterns
-    ('/rel' for files, '/rel/' for directory subtrees); targets are
+    """Split delete-list entries into (exclude_paths, targets,
+    refused). exclude_paths are anchored paths used for literal ancestor
+    protection ('/rel' for files, '/rel/' for directory subtrees); targets are
     (relpath, is_dir) for local deletion. THE LIST IS TRUSTED for the
     permission classes (cleanup-exemption iron rules are enforced
     hub-side ONLY by agents-sync/gc.py validate_entry — single point of
     generation and validation). Entries are refused ONLY when
     structurally malformed (absolute paths, '..' elements, glob
-    metacharacters — the existing wire path convention, these would
-    corrupt rsync pattern semantics), when they name a bare family
+    metacharacters — the preserved GC wire path convention, independent
+    of the literal transfer manifest), when they name a bare family
     container (one such line would rmtree a whole clan on every node),
     when they touch ``gc/`` internals (the sync layer's own gc/ tree is
     self-managed; the only legal gc/ entry is a compression entry
@@ -796,14 +798,15 @@ while stack:
 def _safe_manifest_path(rel):
     """Conservative wire/output names; never let rsync normalize traversal.
 
-    Keep the existing no-glob/newline layout contract. Backslash/control
-    bytes and non-UTF8 names are also refused (rsync -v escapes them, which
-    would make post-transfer marking ambiguous). Fail closed, not skip.
+    Glob characters are literal in --files-from/--from0 and hash protection,
+    not rsync filter patterns. This is NOT the GC deletion-path contract:
+    its GLOB_UNSAFE guard remains unchanged. Backslash/control bytes and
+    non-UTF8 names are refused (rsync escapes them, which would make
+    post-transfer marking ambiguous). Fail closed, not skip.
     """
     return (bool(rel) and all(p not in ('', '.', '..') and p == p.strip()
                              for p in rel.split('/'))
-            and not any(c in GLOB_UNSAFE or c == '\\'
-                        or not c.isprintable() for c in rel))
+            and not any(c == '\\' or not c.isprintable() for c in rel))
 
 
 def remote_manifest(cfg, host, remote_dir):

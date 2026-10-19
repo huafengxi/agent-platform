@@ -23,7 +23,8 @@ class ProtectTests(unittest.TestCase):
     def test_unprotectable_names_abort_before_rsync(self):
         args = SimpleNamespace(verbose=False)
         with tempfile.TemporaryDirectory() as root:
-            for rel in ('task/a/[mine]', 'task/a/a?b', 'task/a/a*b', 'task/a/a\nb'):
+            for rel in ('task/a/a\nb', 'task/a/a\\b', 'task/a/a\0b',
+                        '/absolute', 'task/../a', 'task/a/ a', 'task/a/\udcff'):
                 with self.subTest(rel=rel), \
                      patch.object(ss, 'gc_exclude_and_targets', return_value=([], [], [])), \
                      patch.object(ss, 'unmarked_files', return_value=([rel], True)), \

@@ -1,10 +1,14 @@
 """Shared deletion guards at both ends of the wire, including root entries."""
 import importlib.util
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
 import delete_contract as contract
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'agentd'))
+from safe_delete import safe_rmtree
 
 
 def load(name, file):
@@ -28,6 +32,28 @@ class DeleteContractTests(unittest.TestCase):
                     expected = contract.validate_path(entry, force=forced)
                     self.assertEqual(gc.validate_path(entry, force=forced), expected)
                     self.assertEqual(sync._gc_shape_refused(entry.rstrip("/"), entry.endswith("/"), forced), expected)
+
+    def test_sync_literal_names_do_not_relax_gc_glob_guards(self):
+        self.assertEqual(contract.GLOB_UNSAFE, frozenset('*?[\n'))
+        for rel in ('task/a/[heartbeat run].msg', 'task/a/a*b', 'task/a/a?b',
+                    'task/a/a\nb'):
+            for forced in (False, True):
+                with self.subTest(rel=rel, forced=forced):
+                    self.assertIsNotNone(contract.validate_path(rel, force=forced))
+                    self.assertIsNotNone(gc.validate_path(rel, force=forced))
+                    self.assertIsNotNone(sync._gc_shape_refused(rel, False, forced))
+        base = Path(tempfile.mkdtemp(prefix='delete-contract-test-'))
+        root = base / 'work'
+        root.mkdir()
+        self.addCleanup(lambda: safe_rmtree(root, authorized_root=base))
+        (root / 'gc').mkdir()
+        entries = ['task/a/[heartbeat run].msg', 'task/a/a*b', 'task/a/a?b']
+        (root / 'gc/delete-list.000001').write_text(
+            '\n'.join(entries + [p + ' #FORCED:test' for p in entries]) + '\n')
+        excludes, targets, refused = sync.gc_exclude_and_targets(str(root))
+        self.assertEqual(excludes, [])
+        self.assertEqual(targets, [])
+        self.assertEqual(set(refused), set(entries))
 
     def test_root_entries_never_become_deletion_targets(self):
         with tempfile.TemporaryDirectory() as tmp:

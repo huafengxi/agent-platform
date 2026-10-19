@@ -47,10 +47,19 @@ class SelectionTests(unittest.TestCase):
 
     def test_unsafe_manifest_is_rejected_not_normalized(self):
         for rel in ('/abs', '../x', 'a/../x', 'a//x', 'a/./x', '', '.',
-                    'a/', 'a\nb', 'a\\b', 'a?b', 'a\udcff', ' a', 'a\t',
+                    'a/', 'a\nb', 'a\\b', 'a\udcff', ' a', 'a\t',
                     'a\u2028b', 'a\u0085b'):
             with self.subTest(rel=rel), self.assertRaises(ValueError):
                 ss.pull_files([rel], [], [])
+
+    def test_literal_globs_are_not_protection_patterns(self):
+        paths = ['queue/dispatcher/inbox/[heartbeat run].msg',
+                 'queue/dispatcher/ack/[heartbeat run]',
+                 'literal/a*b', 'literal/a?b', 'literal/a]b']
+        self.assertEqual(ss.pull_files(paths, [], []), sorted(paths))
+        self.assertEqual(ss.pull_files(paths, paths, []), [])
+        self.assertEqual(ss.pull_files(['a*b', 'axxb', 'a*b/child'], ['a*b'], []),
+                         ['axxb'])
 
     def test_prefixed_output_has_unambiguous_names(self):
         files, dirs = ss._rsync_transferred(
@@ -171,6 +180,79 @@ class RealRsyncTests(Fixture):
             os.chown(p, -1, self.gid)
         except OSError:
             self.skipTest('cannot chgrp to replica')
+
+    def test_raw_rsync_files_from_is_literal_and_nonrecursive(self):
+        # Establish rsync's wire semantics independently of our validator.
+        names = ['[ab].msg', 'a*b.msg', 'a?b.msg', 'a]b.msg']
+        for rel in names + ['a.msg', 'axxb.msg', 'axb.msg']:
+            self.write(self.src, rel, rel)
+        self.write(self.src, 'dir[*?]/omitted', 'NOT_LISTED')
+        r = self.real_run(
+            [ss.RSYNC_BIN, ss.WATCH_RSYNC_FLAGS, '--files-from=-', '--from0',
+             '--no-recursive', '--dirs', '--8-bit-output',
+             '--out-format=SSH_SYNC %n', f'--chown=:{ss.REPLICA_GROUP}',
+             str(self.src) + '/', str(self.dst) + '/'],
+            input='\0'.join(names + ['dir[*?]']) + '\0',
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(set(p.name for p in self.dst.iterdir()),
+                         set(names + ['dir[*?]', 'probe']))
+        for rel in names:
+            self.assertEqual((self.dst / rel).read_text(), rel)
+        self.assertEqual(list((self.dst / 'dir[*?]').iterdir()), [])
+        self.assertEqual(ss._rsync_transferred(r.stdout, prefixed=True)[0], set(names))
+
+    def test_literal_glob_originals_and_received_files_are_exact_and_marked(self):
+        pairs = [('[ab].msg', 'a.msg'), ('a*b.msg', 'axxb.msg'),
+                 ('a?b.msg', 'axb.msg'), ('a]b.msg', 'ab.msg')]
+        originals, received = {}, {}
+        for i, (literal, lookalike) in enumerate(pairs):
+            for branch, original, incoming in [('protect', literal, lookalike),
+                                               ('receive', lookalike, literal)]:
+                prefix = f'{branch}/{i}/'
+                p = self.write(self.dst, prefix + original, 'LOCAL')
+                originals[prefix + original] = p.stat()
+                self.write(self.src, prefix + original, 'DO_NOT_OVERWRITE')
+                rel = prefix + incoming
+                received[rel] = 'REMOTE ' + rel
+                self.write(self.src, rel, received[rel])
+        self.write(self.dst, 'collision[*?]', 'LOCAL_FILE')
+        self.write(self.src, 'collision[*?]/hidden', 'MUST_NOT_RECURSE')
+        self.write(self.src, 'collisionX/allowed', 'NEIGHBOR')
+        received['collisionX/allowed'] = 'NEIGHBOR'
+        # Also exercise the fix-up parser/chgrp on a build ignoring --chown.
+        with patch.object(ss, 'REPLICA_GROUP', grp.getgrgid(os.getgid()).gr_name):
+            ok, moved = self.pull(self.gid)
+        self.assertTrue(ok)
+        self.assertEqual(moved, len(received))
+        selected = set(self.transfers[-1][1].split('\0'))
+        for rel, before in originals.items():
+            p = self.dst / rel
+            self.assertEqual(p.read_text(), 'LOCAL', rel)
+            self.assertEqual((p.stat().st_ino, p.stat().st_gid),
+                             (before.st_ino, before.st_gid), rel)
+            self.assertNotIn(rel, selected)
+        for rel, content in received.items():
+            self.assertEqual((self.dst / rel).read_text(), content, rel)
+            self.assertEqual((self.dst / rel).stat().st_gid, self.gid, rel)
+            self.assertIn(rel, selected)
+        self.assertEqual((self.dst / 'collision[*?]').read_text(), 'LOCAL_FILE')
+        self.assertNotIn('collision[*?]/hidden', selected)
+
+    def test_unlisted_glob_directory_children_never_expand(self):
+        manifest = []
+        for name in ('parent[ab]', 'parent*', 'parent?'):
+            self.write(self.src, name + '/omitted', 'MUST_NOT_ARRIVE')
+            self.write(self.src, name + '/allowed', 'OK')
+            manifest += [name, name + '/allowed']
+        self.write(self.src, 'parentX/unlisted', 'MUST_NOT_MATCH')
+        with patch.object(ss, 'remote_manifest', return_value=manifest):
+            self.assertTrue(self.pull(self.gid)[0])
+        for name in ('parent[ab]', 'parent*', 'parent?'):
+            self.assertFalse((self.dst / name / 'omitted').exists())
+            self.assertEqual((self.dst / name / 'allowed').read_text(), 'OK')
+            self.assertEqual((self.dst / name / 'allowed').stat().st_gid, self.gid)
+        self.assertFalse((self.dst / 'parentX').exists())
 
     def test_originals_new_entries_gc_excludes_and_marks(self):
         self.write(self.dst, 'task/a/original', 'MINE')

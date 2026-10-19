@@ -51,7 +51,7 @@ anchors:
 1. 每轮用 SSH `python3` / `scandir` 遍历 hub 全树，输出 NUL 分隔清单；包含目录（含空目录）、普通文件、symlink 和特殊文件，但不跟随 symlink。SSH/扫描非零、超时或不完整清单一律整轮失败，不拿部分结果传输。
 2. 本地重新扫描属组：未标记的普通文件、symlink（含目录链接）和特殊文件都是原件；真实目录不带原件闸门状态。扫描/属组失败则整轮拒绝，仅本地已消失文件可跳过。原件和 GC 条目用 hash 集合，按每个远端路径的祖先查找：原件在 sender 恰为目录时，其整个子树也不接收；GC 目录前缀及同名类型冲突也不接收。`WATCH_EXCLUDES` 的后缀/glob 按路径或 basename 任意深度匹配，被排除目录的子树不传。复杂度由路径长度和排序决定，不再按原件数 × sender 条目数匹配 glob。
 3. 只向 rsync 送 `--files-from=- --from0 --no-recursive --dirs` 的精确相对路径；**目录名不带尾斜杠**（`dir/` 即使在 no-recursive 下也会展开直接子项）。未列目录不能递归绕过过滤。保留 `-c`、`--chown=:replica`、无 `--delete`；空清单也执行成功轮次后的 GC 对账。
-4. 不做路径规范化：绝对路径、空/`.`/`..` 分量、分量首尾空白，以及原有 glob/newline 禁名、反斜杠、不可打印字符（含 Unicode 行分隔符）和非 UTF-8 名字均整轮拒绝，避免清单寻址或落地打标歧义。GC 条目有效性仍只按 `delete_contract.py` 裁定；pull 前不可读清单使该轮失败（缺少整个 gc/ 目录视为空）。新收到的删除清单仍在成功传输后重读、执行；`#FORCED:` 和保护资产边界不变。
+4. 传输清单与原件 hash 保护中的 `*?[]` 按字面路径处理，不作模式匹配；历史信封/ack 中的方括号无需改名或排除。此边界与 GC 删除授权独立，GC 的 `GLOB_UNSAFE` 禁名契约不变。不做路径规范化：绝对路径、空/`.`/`..` 分量、分量首尾空白、反斜杠、不可打印字符（含 newline、Unicode 行分隔符）和非 UTF-8 名字均整轮拒绝，避免清单寻址或落地打标歧义。GC 条目有效性仍只按 `delete_contract.py` 裁定；pull 前不可读清单使该轮失败（缺少整个 gc/ 目录视为空）。新收到的删除清单仍在成功传输后重读、执行；`#FORCED:` 和保护资产边界不变。
 5. sender 文件在扫描后消失等导致 rsync 非零，该轮失败且不执行 GC，下一轮完整重锚定，无候选状态要修复。两次扫描不构成文件系统快照，原有单写者/原子 rename 协议与下轮重试约束不变。
 
 **落地打标**：某些 rsync 构建（实测 brew 3.5.0）静默忽略 `--chown`。pull 使用带固定前缀的 `--out-format` 和 `--8-bit-output`，只认实际传输记录，不把诊断行或 symlink 目标文本当文件名；随后对实际传输的非目录项以 no-follow `chgrp` 打 replica 标，不跟随 symlink 目标。darwin 另需把已打标目录改回主组（macOS 新文件继承父目录属组，否则本机新产物出生即带标 → 被 push 白名单跳过 → 永远到不了 hub）。push 和 one-shot 接口不变。
@@ -60,7 +60,7 @@ anchors:
 
 启动闸门三道（任一失败拒启）：本机 `replica` 组可解析 · 本机 chgrp 功能自检 · 端到端 `--chown` 管道探针（真传一个探针文件到远端 scratch、核落地属组）。第三道在语义上覆盖「远端组存在 / 远端 chgrp 能力 / 两端 rsync 版本兼容」，故那三项只在探针失败后作为诊断跑（每项一行根因）。
 
-细节 = `ssh-sync.py` docstring；单测 = `test_watch.py`（触发模型 / 传输不变量 / 消费侧铁律 / 检测器活体）及 `test_pull_manifest.py`（大保护清单 / 真实 rsync / fail-closed）。inotify ENOSPC 是用户 watch 配额耗尽，不是磁盘满；检测器无法覆盖时，完整性仍由周期全树扫描保证。测试会显式跳过无配额的活体检测器，不调 sysctl、不影响现网 watches。
+细节 = `ssh-sync.py` docstring；单测 = `test_watch.py`（触发模型 / 传输不变量 / 消费侧铁律 / 检测器活体）、`test_pull_manifest.py`（大保护清单 / 真实 rsync 字面 glob 名传输、精确原件保护、replica 打标及不递归 / fail-closed）及 `test_delete_contract.py`（GC glob 禁名不随传输放宽，含强制条目）。inotify ENOSPC 是用户 watch 配额耗尽，不是磁盘满；检测器无法覆盖时，完整性仍由周期全树扫描保证。测试会显式跳过无配额的活体检测器，不调 sysctl、不影响现网 watches。
 
 
 ## gc：清单是权威、schedule 只是计划（删除对账）
