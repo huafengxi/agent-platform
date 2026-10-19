@@ -21,10 +21,11 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import proto
-from wait_state import DialogRequests
+sys.path.insert(0, str(HERE.parent / 'pi-wrap'))
+from rpc_dialogs import DialogRequests
 from safe_delete import safe_rmtree
 
-spec = importlib.util.spec_from_file_location('wait_wrap', HERE.parent / 'pi-wrap/pi-rpc-wrap.py')
+spec = importlib.util.spec_from_file_location('wait_wrap', HERE / 'pi-rpc-wrap.py')
 wrapmod = importlib.util.module_from_spec(spec)
 sys.path.insert(0, str(HERE.parent / 'pi-wrap'))
 spec.loader.exec_module(wrapmod)
@@ -101,7 +102,7 @@ class WaitTests(unittest.TestCase):
 
     def page(self):
         page = (self.root / 'agent-platform/agentd/tasks.md').read_text()
-        command = next(c for c in re.findall(r'\$\{([^}]+)\}', page) if c.endswith('-s active'))
+        command = next(c for c in re.findall(r'<cmd:([^>]+)>', page) if c.endswith('-s active'))
         result = subprocess.run(['bash', '-c', command], cwd=self.root, env=self.env,
                                 text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -151,7 +152,7 @@ class WaitTests(unittest.TestCase):
         body = self.assert_no_hint()
         self.assertIn('当前工具', body)
         self.assertIn('`ask_dispatcher` (', body)
-        self.assertIn('已发出、尚未记录结果', body)
+        self.assertIn('已发出、尚未记录结果', (self.root / 'agent-platform/agentd/tasks.md').read_text())
         self.assertNotIn('Which option?', body)
         self.session(result='fixture answer')
         self.assertNotIn('`ask_dispatcher`', self.assert_no_hint())
@@ -255,7 +256,7 @@ class WaitTests(unittest.TestCase):
         env = dict(self.env, AGENTD_WRAP_PI_BIN=str(fake), AGENTD_WRAP_SETTLE_WINDOW='0.05',
                    AGENTD_WRAP_ARM_TIMEOUT='0.05', WAIT_TEST_MODE=mode)
         err = open(self.root / 'wrapper.log', 'w')
-        p = subprocess.Popen([sys.executable, str(HERE.parent / 'pi-wrap/pi-rpc-wrap.py')], env=env, stderr=err)
+        p = subprocess.Popen([sys.executable, str(HERE / 'pi-rpc-wrap.py')], env=env, stderr=err)
         def cleanup():
             if p.poll() is None: p.terminate()
             try: p.wait(timeout=5)

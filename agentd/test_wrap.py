@@ -2,7 +2,7 @@
 """test_wrap.py — pi-rpc-wrap.py 单元测试（验证组 U）。
 
 在 /tmp 临时树搭 agents/task/<id>/，以 fakepi_rpc.py 冒充 `pi --mode rpc`，
-逐场景断言。仅标准库。用法：python3 pi-wrap/test_wrap.py
+逐场景断言。仅标准库。用法：python3 agentd/test_wrap.py
 
 射程分工：**人格面的内容**（caps 展开序 / 回落 / 工具面并集 / knowledge 三档 / model 派生 /
 压缩策略归一 / 降级矩阵）不在这里断言 —— 那是解析层的输出契约，归 `test_persona.py`（P 系列）。
@@ -48,9 +48,8 @@ def _wrap_ext_dir_rel():
 
 EXT_DIR_REL = _wrap_ext_dir_rel()
 EXT_DIR_PARTS = tuple(EXT_DIR_REL.split("/"))
-# proto.py 住在兄弟仓 agentd/（协议单点，与 TS 侧 core.ts 同源）；AGENTD_DIR 可改指
-AGENTD_DIR = os.environ.get("AGENTD_DIR") or os.path.join(
-    os.path.dirname(HERE), "agentd")
+# Agent 协议和适配现在同住 agentd/；通用 P 不负责定位这些模块。
+AGENTD_DIR = HERE
 for _p in (HERE, AGENTD_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)

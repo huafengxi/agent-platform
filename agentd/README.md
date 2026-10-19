@@ -51,11 +51,11 @@ Web 报表适配器通过宿主提供的 `__file__` 定位相邻 CLI，并使用
 | `scheduler.py` / `scheduler-loop.sh` | 单实例无状态 DAG 放行 |
 | `report.py` / `needscheck.py` | Markdown 报表 / JSON 不可满足依赖清单，均只读 |
 | `agentd4web.py` / `tasks.md` | 报表的 web 入口与视图 |
-| `wait_state.py` | 封装 socket attach 的内存 dialog 基线（不写等待快照） |
+| `pi-rpc-wrap.py` / `persona.py` | agent 专属会话适配与人格解析；[契约](RPC-ADAPTER.md) |
 | `envscrub.py` / `safe_delete.py` | 进程环境身份洗刷 / 临时测试根安全删除，契约见模块头 |
 | `e2e.py` / `test_*.py` / `fakeagent.py` | 回归与测试负载，覆盖面取各文件头 |
 
-会话封装由兄弟 `pi-wrap/` 模块承担；任务树由调用方管理，不入本模块 git。
+本模块的 agent RPC 适配依赖兄弟 `pi-wrap/` 的通用 Transport；P 不反向依赖本模块。原生 dialog 内存基线的唯一实现为 `pi-wrap/rpc_dialogs.py`。任务树由调用方管理，不入 git。
 
 ## 用法
 
@@ -157,7 +157,7 @@ home 内 command/workdir 路径存 `~/…`，runner 按执行机 home 展开；�
 
 ## 已知风险（多机）
 
-离线机的运行任务保守占位；永久退役机器的排队件须重新登记并处置旧件。手工漏写 host 的目录无人认领。其它协议边界见协议 §11；会话收敛与临末注入风险见 `pi-wrap/README.md` 的 Exit-code contract。
+离线机的运行任务保守占位；永久退役机器的排队件须重新登记并处置旧件。手工漏写 host 的目录无人认领。其它协议边界见协议 §11；会话收敛与临末注入风险见 [RPC-ADAPTER.md](RPC-ADAPTER.md) 的 Exit-code contract。
 
 ## 判死纪律与杀纪律（协议 §5.5）
 
@@ -179,6 +179,6 @@ home 内 command/workdir 路径存 `~/…`，runner 按执行机 home 展开；�
 
 CLI 参数与覆盖场景取 `e2e.py` 文件头；runner 生命周期、通知与报表分别有 `test_runner_final.py`、`test_runner_notify.py`、`test_report_slots.py`；本机互斥回归见 `test_runner_lock.py`。用临时根运行，禁止测试负载落生产树；并发改代码时用完整快照隔离。
 
-外部测试有界运行并保留真实退出码。调用方扩展测试及 opt-in 真 pi 注入探针住扩展 tests/；收件闸门的三态判据与探针入口 = `@notify-and-delivery`。封装与人格装配测试住 pi-wrap，资产与名字引用校验住调用方 bots，不在本模块复制步骤。
+外部测试有界运行并保留真实退出码。调用方扩展测试及 opt-in 真 pi 注入探针住扩展 tests/；收件闸门的三态判据与探针入口 = `@notify-and-delivery`。agent 封装与人格装配测试住本模块，通用宿主与独立运行测试住 pi-wrap；资产与名字引用校验住调用方 bots，不在本模块复制步骤。
 
 历史测试基线、环境戳与事故来源可按固定版本 `02ed2173:README.md` 取证；当前行为以上述权威与代码为准。

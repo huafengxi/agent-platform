@@ -7,7 +7,7 @@ test_wrap.py 钉**发射层与生命周期**（pi argv 逐格、就绪握手、�
 两者共用同一份解析 ⇒ 解析层回归由本文件先抓到，发射层回归由 test_wrap 抓。
 
 仅标准库（夹具的 cap.yml 用「标量键 + 流式数组」两种形态，与 test_wrap 同款极简序列化）。
-跑法：`python3 pi-wrap/test_persona.py`（退出码 0 = 全绿）。
+跑法：`python3 agentd/test_persona.py`（退出码 0 = 全绿）。
 """
 import json
 import os
