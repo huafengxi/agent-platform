@@ -102,9 +102,9 @@ import threading
 import time
 from collections import deque
 
-# Agent policy lives here. Dependency direction is agentd -> generic pi-wrap.
+# Agent policy lives here. Dependency direction is agentd -> generic pi-host.
 _HERE = os.path.dirname(os.path.realpath(__file__))
-_P = os.path.join(os.path.dirname(_HERE), 'pi-wrap')
+_P = os.path.join(os.path.dirname(_HERE), 'pi-host')
 for _path in (_P, _HERE):
     if _path not in sys.path:
         sys.path.insert(0, _path)
@@ -144,7 +144,7 @@ CHILD_EXTS = (            # 子端扩展（相对 $AGENT_ROOT，由 EXT_DIR_REL 
     # receiver 已覆盖自家信箱，再注入本扩展只会白占一份 watch/poll。
     EXT_DIR_REL + "/receiver-child.ts",
 )
-PROBE_EXT_REL = "w/ext/sessiond/probe.ts"   # sessiond 探针：任务/常驻会话
+PI_EXTENSION_REL = "w/ext/sessiond/pi-extension.ts"   # sessiond 探针：任务/常驻会话
                                             # 也注入，使 spec.json?v=chat 观测面 /inspect 可用
 # 人格装配不住在本文件：解析层 = 同目录 `persona.py`（合并语义与降级分支的单一实现），
 # 注入层 = pi 侧扩展 PROFILE_LOADER_EXT_REL（本文件只负责把它 `-e` 进去）。
@@ -160,7 +160,7 @@ TOOL_OUTPUT_CAP_ENV = persona.TOOL_OUTPUT_CAP_ENV             # 同族的工具�
 PROFILE_LOADER_EXT_REL = "pi-core/agent/extensions/profile-loader.ts"   # 人格注入层（= ~/.pi/agent/
                                             # extensions/ 的自动发现面，被追踪 ⇒ 四机同步）；
                                             # 文件缺失 → WARN + 不注入（会话裸起、人格面缺席，
-                                            # 口径同 PROBE_EXT_REL；绝不 die——硬失败会自锁）
+                                            # 口径同 PI_EXTENSION_REL；绝不 die——硬失败会自锁）
 
 
 def log(fmt, *args):
@@ -343,16 +343,16 @@ class Wrap(Transport):
                     self.child_recv_injected = True   # 就绪握手对象在场（await_child_arm）
             else:
                 log("WARN: 子端扩展缺失，跳过注入: %s", p)
-        argv += self._probe_ext_argv()
+        argv += self._session_ext_argv()
         argv += self._persona_ext_argv()
         return argv
 
     # ---------- knowledge 知识清单注入（规范 bots/README.md「知识库规范」） ----------
 
-    def _probe_ext_argv(self):
+    def _session_ext_argv(self):
         """sessiond 探针扩展注入（观测面 /inspect 支持）：文件缺失只告警不拖垮会话，
         口径与 proc.py:_spawn 同款；此时 /inspect 回「探针未加载」而非 403。"""
-        p = os.path.join(self.root, PROBE_EXT_REL)
+        p = os.path.join(self.root, PI_EXTENSION_REL)
         if os.path.exists(p):
             return ["-e", p]
         log("WARN: 探针扩展缺失，跳过注入（/inspect 不可用）: %s", p)
@@ -381,7 +381,7 @@ class Wrap(Transport):
         的追加之前。本文件同时也在自动发现目录里（`~/.pi/agent/extensions/`，手工/交互会话免
         `-e`），pi 按 realpath 去重 ⇒ 只装载一次（不会撞 flag 名）。
 
-        文件缺失 → WARN + 不注入（会话裸起、人格面缺席；口径同 `PROBE_EXT_REL`）。**绝不 die**：
+        文件缺失 → WARN + 不注入（会话裸起、人格面缺席；口径同 `PI_EXTENSION_REL`）。**绝不 die**：
         本路径在所有会话 spawn 的公共路上，硬失败会自锁（连「修这条路径」的修复会话都起不来）。
         返回 `[]` ∨ `["-e", <绝对路径>]`。"""
         p = os.path.join(self.root, PROFILE_LOADER_EXT_REL)

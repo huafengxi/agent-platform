@@ -221,7 +221,7 @@ EXT_REL = os.environ.get("AGENTD_EXT_REL") or "pi-core/agent/extensions/agentd"
 EXT_PARTS = tuple(EXT_REL.split("/"))
 EXT_DIR = os.path.abspath(os.path.join(workspace_root(__file__), *EXT_PARTS))
 # 继承面洗刷（t-zqm0）：名单单一事实源 = 同目录 envscrub.py（与 runner.py /
-# serviced/serviced.py / w/ext/sessiond/proc.py 同源），本文件 ⛔ 不复制第二份名单。
+# serviced/serviced.py / w/ext/sessiond/sessions.py 同源），本文件 ⛔ 不复制第二份名单。
 # 入口就地洗 os.environ（_scrub_inherited_env），其后所有子进程 env 一律经 scrub_env()
 # 取（幂等：入口洗过后再洗零增量），⛔ 不再直接 dict(os.environ) 继承宿主身份族。
 # 放在 PI_WRAP_DIR/EXT_REL 取值之后 ⇒ 那两个注入口（PI_ 前缀族）不受洗刷影响。

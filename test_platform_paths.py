@@ -28,6 +28,15 @@ class LayoutTests(unittest.TestCase):
                 self.assertEqual(workspace_root(self.repo / name / "entry.py"), str(self.ws))
                 self.assertFalse((self.ws / name).exists())
 
+    def test_pi_host_is_the_only_host_module(self):
+        repo = Path(__file__).resolve().parent
+        self.assertIn('pi-host', MODULES)
+        self.assertNotIn('pi-wrap', MODULES)
+        self.assertTrue((repo / 'pi-host/pi_host.py').is_file())
+        self.assertTrue((repo / 'pi-host/local_process.py').is_file())
+        self.assertFalse((repo / 'pi-wrap').exists())
+        self.assertFalse((repo / 'pi-host/ordinary_process.py').exists())
+
     def test_explicit_workspace_and_legacy_copy(self):
         legacy = self.root / "legacy" / "agentd"
         legacy.mkdir(parents=True)

@@ -13,11 +13,11 @@ import tempfile
 import time
 import unittest
 
-import ordinary_process as O
+import local_process as O
 from rpc_dialogs import DialogRequests
 
 P = Path(__file__).resolve().parent
-RUNTIME = ('pi_host.py', 'transport.py', 'host_io.py', 'ordinary_process.py', 'rpc_dialogs.py')
+RUNTIME = ('pi_host.py', 'transport.py', 'host_io.py', 'local_process.py', 'rpc_dialogs.py')
 
 
 class Standalone(unittest.TestCase):

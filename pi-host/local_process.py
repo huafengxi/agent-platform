@@ -1,4 +1,4 @@
-"""Local process facts for the ordinary host, not agent task/bot policy.
+"""Local process and Unix peer facts; no agent task/bot policy.
 
 Linux start tokens are unchanged /proc ticks. Darwin tokens are integer
 microseconds from proc_bsdinfo's start timeval. These are local identity checks,
@@ -43,7 +43,7 @@ def boot_id():
     if sys.platform.startswith('linux'):
         return Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     if sys.platform != 'darwin':
-        raise RuntimeError('unsupported ordinary process platform')
+        raise RuntimeError('unsupported local process platform')
     class Timeval(ctypes.Structure):
         _fields_ = [('sec', ctypes.c_long), ('usec', ctypes.c_int)]
     libc = ctypes.CDLL(None, use_errno=True)
@@ -88,7 +88,7 @@ def identity(pid):
                     pgid=int(fields[2]), sid=int(fields[3]),
                     ppid=int(fields[1]), state=fields[0])
     if sys.platform != 'darwin':
-        raise RuntimeError('unsupported ordinary process platform')
+        raise RuntimeError('unsupported local process platform')
     b = _bsd_info(pid)
     if b is None:
         return None

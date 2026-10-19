@@ -1,4 +1,4 @@
-"""In-memory RPC dialog baseline for pi-wrap socket attach only.
+"""In-memory RPC dialog baseline for pi-host socket attach only.
 
 This is not a task-tab wait detector. Native internal signal settlement is not
 observable on the unmodified RPC stream; no state file or session entry is

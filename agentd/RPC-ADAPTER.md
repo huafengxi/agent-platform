@@ -1,7 +1,7 @@
 # Agent RPC adapter — task/resident policy in agentd
 
 This adapter and persona resolver belong to agentd. They depend on the generic
-Transport in `../pi-wrap/`; P never imports agentd. Caller assets and deployment
+Transport in `../pi-host/`; P never imports agentd. Caller assets and deployment
 remain external. Old `pi-wrap/pi-rpc-wrap.py` and `pi-wrap/persona.py` paths are
 removed, not compatibility shims. Update caller command/parser paths before
 activation; drain or explicitly re-register pending specs containing old paths.
@@ -39,7 +39,7 @@ reader who found the repo first.
 
 判据（可验证）：改一处部署 ∨ 改一条政策措辞，不得产生本模块的 diff。
 
-**② 已知残留（记账，⛔ 不当缺陷重提）**：`pi-rpc-wrap.py` 里三枚相对路径常量的缺省值写的是参照部署的布局 —— `EXT_DIR_REL`（可经 `AGENTD_EXT_REL` 注入）、`PROFILE_LOADER_EXT_REL`、`PROBE_EXT_REL`（后两枚无注入口）。裁定（2026-10-01，agentfw 域）：⛔ 不属收录判据违例 —— 三者四机同值、随 git 同步，不是「按部署面变化的值」；判据的行为面（改部署 ⇒ 零 diff）由 `AGENTD_EXT_REL` 与 `--root` 现场发现满足。重议触发 = 出现一次「某台机/某个调用方需要不同路径」的真实需求 ⇒ 那时给后两枚补同款 env 注入口（⛔ 不提前加，属为假想部署加码）。
+**② 已知残留（记账，⛔ 不当缺陷重提）**：`pi-rpc-wrap.py` 里三枚相对路径常量的缺省值写的是参照部署的布局 —— `EXT_DIR_REL`（可经 `AGENTD_EXT_REL` 注入）、`PROFILE_LOADER_EXT_REL`、`PI_EXTENSION_REL`（后两枚无注入口）。裁定（2026-10-01，agentfw 域）：⛔ 不属收录判据违例 —— 三者四机同值、随 git 同步，不是「按部署面变化的值」；判据的行为面（改部署 ⇒ 零 diff）由 `AGENTD_EXT_REL` 与 `--root` 现场发现满足。重议触发 = 出现一次「某台机/某个调用方需要不同路径」的真实需求 ⇒ 那时给后两枚补同款 env 注入口（⛔ 不提前加，属为假想部署加码）。
 
 ## Why a wrapper at all
 

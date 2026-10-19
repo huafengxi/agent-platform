@@ -513,14 +513,14 @@ def t10_resident_no_prompt():
 
 
 def t11_probe_ext():
-    """T11 探针扩展注入（任务/常驻同款）：探针在场时 argv 带 -e probe.ts，
+    """T11 探针扩展注入（任务/常驻同款）：探针在场时 argv 带 -e pi-extension.ts，
     使 spec.json?v=chat 观测面 /inspect 可用；缺失时静默跳过（其余测试已覆盖）。"""
     for mode, extra in (("task", {}),
                         ("resident", {"AGENTD_RESIDENT": "1",
                                       "AGENTD_SESSION_NAME":
                                           "bot/zz-probe-t11"})):
         e = Env("t11-" + mode, extra_env=extra)
-        probe = os.path.join(e.root, "w", "ext", "sessiond", "probe.ts")
+        probe = os.path.join(e.root, "w", "ext", "sessiond", "pi-extension.ts")
         os.makedirs(os.path.dirname(probe))
         with open(probe, "w") as f:
             f.write("export default function () {}\n")
@@ -532,7 +532,7 @@ def t11_probe_ext():
             else:
                 e.wait_argv()      # resident 不收敛：事件驱动等 argv 快照（旧 sleep(2)）
             argv = e.read_argv()
-            ok("T11 %s 探针注入（-e probe.ts）" % mode,
+            ok("T11 %s 探针注入（-e pi-extension.ts）" % mode,
                argv is not None and "-e" in argv and probe in argv,
                repr(argv))
         finally:

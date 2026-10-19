@@ -2,7 +2,7 @@
 """Explicit ordinary-session host. No agent identity, prompt or settle policy.
 
 Usage: python pi_host.py /absolute/local/declaration.json
-See HOST.md. A new invocation is an explicit recovery, never a transparent retry.
+See README.md. A new invocation is an explicit recovery, never a transparent retry.
 """
 import json
 import os

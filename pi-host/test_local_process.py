@@ -1,4 +1,4 @@
-"""Ordinary process platform facts. Real tests touch only this test's children."""
+"""Local process platform facts. Real tests touch only this test's children."""
 import ctypes
 import os
 from pathlib import Path
@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-import ordinary_process as O
+import local_process as O
 
 
 class ProcessTests(unittest.TestCase):

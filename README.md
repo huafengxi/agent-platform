@@ -9,7 +9,7 @@
 | 模块 | 职责 |
 |---|---|
 | agentd/ | 文件协议、任务调度与监督、任务/常驻 RPC 适配及人格装配 |
-| pi-wrap/ | 独立标准库 pi 宿主：PIPE/socket、原生 RPC 重放、真实进程退出；不依赖 agentd |
+| pi-host/ | 独立标准库 pi 宿主：PIPE/socket、原生 RPC 重放、真实进程退出；不依赖 agentd |
 | agents-sync/ | 运行树传输与删除传播 |
 | serviced/ | 服务启停、探测与期望态纠偏 |
 | heartbeatd/ | 声明式定时触发 |

@@ -21,7 +21,7 @@ CLI（扩展侧 `execFileSync` 调用；**stdout = 一个 JSON 对象**，告警
 绝不 die——硬失败会自锁（连「修这条路径」的修复会话都起不来）。只有用法错误 ∨ 内部 bug
 （不该发生）才非 0。
 
-输出 schema（`schemaVersion` 递增即契约变更；跨仓契约的两侧 pin = `pi-wrap/test_persona.py`
+输出 schema（`schemaVersion` 递增即契约变更；跨仓契约的两侧 pin = `agentd/test_persona.py`
 与 `bots/extensions/profile-loader/`）：
 
     schemaVersion   int    本 schema 版本

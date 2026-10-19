@@ -21,13 +21,13 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import proto
-sys.path.insert(0, str(HERE.parent / 'pi-wrap'))
+sys.path.insert(0, str(HERE.parent / 'pi-host'))
 from rpc_dialogs import DialogRequests
 from safe_delete import safe_rmtree
 
 spec = importlib.util.spec_from_file_location('wait_wrap', HERE / 'pi-rpc-wrap.py')
 wrapmod = importlib.util.module_from_spec(spec)
-sys.path.insert(0, str(HERE.parent / 'pi-wrap'))
+sys.path.insert(0, str(HERE.parent / 'pi-host'))
 spec.loader.exec_module(wrapmod)
 
 # The trace is fixture-only: a copy of existing RPC events, not a new production

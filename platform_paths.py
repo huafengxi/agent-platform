@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import sys
 
-MODULES = ("agentd", "pi-wrap", "agents-sync", "serviced", "heartbeatd", "git-sync")
+MODULES = ("agentd", "pi-host", "agents-sync", "serviced", "heartbeatd", "git-sync")
 
 
 def workspace_root(source):

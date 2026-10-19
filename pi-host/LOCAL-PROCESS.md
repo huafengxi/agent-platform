@@ -1,6 +1,6 @@
-# Ordinary host process facts
+# Local process facts
 
-`ordinary_process.py` provides local process identity and AF_UNIX peer facts for
+`local_process.py` provides local process identity and AF_UNIX peer facts for
 `pi_host.Host` and its explicitly configured Web client. It does not register
 agents or run a lifecycle owner. Generic Transport uses these local facts by
 default. The agent adapter in A overrides identity hooks with its own proto
@@ -27,7 +27,7 @@ failed read or identity mismatch is not authorization to signal. Linux callers
 can continue to use pidfd. No new stop RPC, worker, service or dependency on a
 runtime generation is introduced.
 
-Run `python3 -B test_ordinary_process.py` for real
+Run `python3 -B test_local_process.py` for real
 own-process/child/peer checks and deterministic Darwin error-path tests. The
 Linux-specific token oracle skips on Darwin; that skip is not a Darwin failure
 or evidence of Linux behavior on Darwin. Full ordinary-host and Web lifecycle

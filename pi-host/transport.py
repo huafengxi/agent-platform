@@ -14,7 +14,7 @@ import subprocess
 import threading
 
 import host_io
-import ordinary_process
+import local_process
 from rpc_dialogs import DialogRequests, DIALOG_METHODS
 
 RING_MAX = 200
@@ -74,10 +74,10 @@ class Transport:
         self._pump_threads = []
 
     def process_starttime(self, pid):
-        return ordinary_process.starttime(pid)
+        return local_process.starttime(pid)
 
     def process_owner_alive(self, pid, expected_start):
-        return ordinary_process.owner_alive(pid, expected_start)
+        return local_process.owner_alive(pid, expected_start)
 
     def setup_socket(self):
         """Bind one explicit endpoint, without cross-process file locks.

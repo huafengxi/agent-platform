@@ -1,4 +1,4 @@
-# pi-wrap — independent local pi RPC host
+# pi-host — independent local pi RPC host
 
 P is a Python-standard-library-only process/transport mechanism. Copy this
 whole directory anywhere and run it without agentd, a workspace, persona assets,
@@ -62,7 +62,7 @@ unique-id `get_state`. Only its matching successful response accepts startup.
 No request is sent to a mismatched peer. This belongs to the launching caller,
 not a pre-start arbitration protocol inside P. macOS signals use accepted
 check-identity-then-kill semantics, not atomic process handles; see
-[ORDINARY-PROCESS.md](ORDINARY-PROCESS.md).
+[LOCAL-PROCESS.md](LOCAL-PROCESS.md).
 
 ## Boundary and migration
 
@@ -82,7 +82,7 @@ record operations needed by P; it is not a copy of agentd/proto.py.
 
 ```sh
 python3 -B test_standalone.py
-python3 -B test_ordinary_process.py
+python3 -B test_local_process.py
 python3 -B test_generic.py  # Linux-only pidfd/orphan scenarios
 ```
 
