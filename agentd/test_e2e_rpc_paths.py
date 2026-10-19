@@ -4,6 +4,7 @@ Full e2e contains opt-in real-pi scenarios. This bounded regression executes onl
 its original path assignments, fake env helper and fake WRAP_CMD in a new root.
 """
 import ast
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -42,11 +43,13 @@ class E2EPaths(unittest.TestCase):
         print('A_E2E_FAKE_ROOT=' + str(root), flush=True)
         home = root / 'agents/task/test'; home.mkdir(parents=True)
         private = root / 'home'; private.mkdir()
+        (root / 'flags').mkdir()
         ns = defaults(root)
         env = dict(HOME=str(private), TMPDIR=str(root),
                    PATH=str(Path(sys.executable).parent) + os.pathsep + os.defpath,
                    AGENT_ROOT=str(root), AGENT_HOME=str(home), AGENT_SELF='task/test',
-                   AGENTD_WRAP_SETTLE_WINDOW='.05', PYTHONDONTWRITEBYTECODE='1',
+                   AGENTD_WRAP_SETTLE_WINDOW='.05', FAKE_FLAG_DIR=str(root / 'flags'),
+                   PYTHONDONTWRITEBYTECODE='1',
                    **ns['_wrap_env']('ok'))
         # No PI_WRAP_DIR override, runner, real pi, assets or model endpoint.
         result = subprocess.run(['bash', '-c', ns['WRAP_CMD']], cwd=root, env=env,
@@ -54,7 +57,11 @@ class E2EPaths(unittest.TestCase):
         (root / 'stdout').write_text(result.stdout); (root / 'stderr').write_text(result.stderr)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('任务收敛完成', result.stderr)
-        self.assertTrue((home / 'session/session.jsonl').is_file())
+        # The existing 'ok' fake does not persist a session. Its original trace
+        # proves the actual argv and exactly one accepted stdin prompt instead.
+        argv = json.loads((root / 'flags/argv').read_text())
+        self.assertEqual(argv[argv.index('--session') + 1], str(home / 'session/session.jsonl'))
+        self.assertEqual((root / 'flags/prompt').read_text(), '1\n')
         self.assertFalse((home / 'diagnosis.md').exists())
         self.assertEqual(list((root / 'run').rglob('*.sock')), [])
         self.assertEqual(len(list((root / 'run').rglob('*.lock'))), 2)
