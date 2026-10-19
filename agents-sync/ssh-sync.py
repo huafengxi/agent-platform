@@ -37,12 +37,14 @@ Both pipelines encode file ORIGIN in group metadata:
 
     SSH python3 scandir hub -> NUL manifest (never follows symlinks)
     hash/ancestor filter: remove local originals + GC + WATCH_EXCLUDES
+    minimal tree: omit selected ancestors carried by selected descendants
     rsync -rlptDvc --files-from=- --from0 --no-recursive --dirs \
         --chown=:replica <host>:<remote>/ <local>/
 
   Every cycle rebuilds both scans. This is NOT a persistent candidate ledger.
-  Unlike N original-path exclude patterns matched against M sender entries,
-  hash membership does not make rsync perform N*M glob comparisons.
+  Hash membership avoids N original-path excludes matched against M sender
+  entries. Minimal descriptions reduce the native receiver's implied-filter
+  work too; sender validation stays enabled and is not claimed to be linear.
 
 Rules, point by point:
 
@@ -67,8 +69,10 @@ Rules, point by point:
    locally → pushed, and protected on pull). ``session/`` travels like
    any other subtree.
 5. Both transfer lists travel via stdin (``--files-from=- --from0``),
-   with no temp files. Pull sends exact root-relative paths, including empty
-   directories, WITHOUT trailing slashes: ``dir/`` expands immediate children
+   with no temp files. After filtering, pull sends maximal root-relative paths;
+   default relative/implied-dir handling carries omitted ancestors and their
+   attributes. Empty leaf directories remain explicit. No path has a trailing
+   slash: ``dir/`` expands immediate children
    even with ``--no-recursive``. No unlisted directory may recurse. Local
    originals and GC entries block exact paths AND sender descendants; a local
    original file is safe even when the sender has a directory at that path.
@@ -857,6 +861,26 @@ def pull_files(manifest, originals, gc_excludes, excludes=()):
     return sorted(selected)
 
 
+def minimal_pull_tree(paths):
+    """Describe an already filtered tree by its maximal selected paths.
+
+    rsync's default relative/implied-dir handling carries each leaf's
+    ancestors, including their attributes. Empty leaf directories remain
+    explicit, WITHOUT trailing slashes or recursive child expansion.
+    Filter originals/GC/exclusions BEFORE calling: removing a protected leaf
+    may leave a parent directory that still needs to be transferred.
+    This is stateless description reduction, not a smaller sync surface.
+    """
+    paths = set(paths)
+    leaves = paths.copy()
+    for path in paths:
+        parent = path.rpartition('/')[0]
+        while parent:
+            leaves.discard(parent)
+            parent = parent.rpartition('/')[0]
+    return sorted(leaves)
+
+
 def _watch_ssh_e(cfg):
     return ["-e", " ".join(["ssh", "-F", shlex.quote(cfg)] + SSH_TIMEOUT_OPTS)]
 
@@ -915,8 +939,9 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
     + push: every local regular file NOT marked ``replica`` (my originals)
       → ``--files-from=-``; lands marked on the receiver;
     + pull: fresh SSH hub manifest minus original/GC/exclusion ancestors
-      → NUL exact --files-from with --no-recursive --dirs. No per-original
-      rsync glob patterns, no persistent candidates, no directory expansion.
+      → minimal tree description, then NUL --files-from with --no-recursive
+      --dirs; native implied dirs carry omitted ancestors. No per-original
+      rsync glob patterns, persistent candidates or directory expansion.
       Transferred non-directory entries get no-follow replica marking.
 
     ``n_moved`` comes from rsync -v's own output, so a cycle that moved
@@ -978,6 +1003,7 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
         try:
             files = pull_files(remote_manifest(cfg, host, remote_dir),
                                unmarked, gc_excludes, WATCH_EXCLUDES)
+            tree = minimal_pull_tree(files)
         except (OSError, ValueError, subprocess.TimeoutExpired) as e:
             wlog(f'error: pull: manifest failed; skipping this cycle: {e}')
             _bump('errors')
@@ -989,10 +1015,11 @@ def watch_rsync(cfg, host, local_dir, remote_dir, args, direction,
                + _WATCH_REMOTE_RSYNC_OPTS
                + _watch_optional_flags(args) + _watch_ssh_e(cfg)
                + [src, dst])
-        stdin = ''.join(p + '\0' for p in files)
+        stdin = ''.join(p + '\0' for p in tree)
         if args.verbose:
             wlog(f'pull: {len(unmarked)} protected originals; '
-                 f'{len(files)} exact hub entries selected')
+                 f'{len(files)} exact hub entries selected; '
+                 f'{len(tree)} minimal tree entries')
 
     _bump(f"{direction}_cycles")
     try:
