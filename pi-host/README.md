@@ -58,6 +58,12 @@ remains after socket cleanup. P never writes or removes it.
 Pi's PID is held in P's subprocess handle, not in persistent lifecycle records.
 A stale P record is never a current liveness oracle.
 
+The flat `host.json` fields are `pid`, `start`, `boot`, `uid`, `pgid`, `sid`,
+`ppid` and `state`. `start` is a string token in the local platform's units;
+`boot` distinguishes boots. Parent and state are startup snapshots, so a caller
+must read current kernel facts for liveness. Binding, launch input, pi identity,
+child waits and errors are not fields in this record.
+
 Pi cannot continue independently after P. On Linux, `child_exec.py` arms
 PR_SET_PDEATHSIG(SIGKILL) in a fresh interpreter and then execs pi without an
 extra resident process. Parent checks before and after arming close the startup
