@@ -64,9 +64,15 @@ class Host(Transport):
 
     def publish_socket_owner(self, owner):
         # Called only AFTER bind, by this actual P. No caller launch prediction.
-        self.record = dict(binding=self.binding, host=local_process.identity(os.getpid()),
-                           child=None, childWait=None)
+        self.record = dict(binding=self.binding, host=local_process.identity(os.getpid()))
         self.publish()
+
+    def launch_argv(self, config):
+        if sys.platform.startswith('linux'):
+            return [sys.executable, '-B', str(Path(_HERE) / 'child_exec.py'),
+                    str(os.getpid()), *config.argv()]
+        # Native pi RPC exits on stdin EOF when P closes or loses its PIPEs.
+        return config.argv()
 
     def remove_socket_owner(self):
         # Keep actual identities/wait available after endpoint cleanup.
@@ -79,13 +85,12 @@ class Host(Transport):
         self.setup_socket()
         try:
             self.launch(self.config)
-            self.record['child'] = local_process.identity(self.pi.pid)
-            if self.record['child'] is None:
+            child = local_process.identity(self.pi.pid)
+            if child is None:
                 raise RuntimeError('child start identity unavailable')
-            self.publish()
             threading.Thread(target=self.accept_loop, daemon=True, name='host-accept').start()
             fact('host_started', hostPid=os.getpid(), hostProcStart=self.record['host']['start'],
-                 childPid=self.pi.pid, childProcStart=self.record['child']['start'],
+                 childPid=self.pi.pid, childProcStart=child['start'],
                  sessionFile=self.session_file, sessionName=self.session_name, socketPath=self.sock_path)
             rc = self.pi.wait()  # sole pi wait, no restart or report predicate
             self.record['childWait'] = dict(returncode=rc)

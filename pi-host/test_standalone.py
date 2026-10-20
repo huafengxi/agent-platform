@@ -17,7 +17,7 @@ import local_process as O
 from rpc_dialogs import DialogRequests
 
 P = Path(__file__).resolve().parent
-RUNTIME = ('pi_host.py', 'transport.py', 'host_io.py', 'local_process.py', 'rpc_dialogs.py')
+RUNTIME = ('pi_host.py', 'transport.py', 'host_io.py', 'local_process.py', 'rpc_dialogs.py', 'child_exec.py')
 
 
 class Standalone(unittest.TestCase):
@@ -100,6 +100,7 @@ runpy.run_path(entry,run_name='__main__')
             self.assertEqual(state['host']['pid'], p.pid)
             self.assertEqual(state['childWait'], {'returncode': 7})
             self.assertNotIn('instance', state)
+            self.assertNotIn('child', state)
             for name in ('s.pid', 's.stderr.log', 'config.json', 'current.json', 'binding.json'):
                 self.assertFalse((root / name).exists(), name)
             self.assertFalse((root / 's').exists())

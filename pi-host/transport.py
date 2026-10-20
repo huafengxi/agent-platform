@@ -146,6 +146,9 @@ class Transport:
             self.srv.close()
             self.srv = None
 
+    def launch_argv(self, config):
+        return config.argv()
+
     def launch(self, config):
         if self.pi is not None:
             raise RuntimeError('one pi child per host invocation; explicit new host required')
@@ -159,7 +162,7 @@ class Transport:
                 raise ValueError('invalid RUND_LEASE_FD')
             os.fstat(fd)
             pass_fds = (fd,)
-        self.pi = subprocess.Popen(config.argv(), cwd=config.cwd, env=config.env,
+        self.pi = subprocess.Popen(self.launch_argv(config), cwd=config.cwd, env=config.env,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, pass_fds=pass_fds)
         for name, target in [('stdout', self._read_stdout), ('stderr', self._read_stderr)]:

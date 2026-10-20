@@ -47,15 +47,24 @@ The ordinary host creates only these runtime outputs beside that endpoint:
 
 | Output | Writer and meaning |
 |---|---|
-| `host.json` | P alone: canonical session/name/cwd binding, actual P identity, actual pi identity when available, and `childWait` only after real `wait()` |
+| `host.json` | P alone: canonical session/name/cwd binding, actual P identity, and `childWait` only after real `wait()` |
 | socket (normally `s`) | P's Unix stream endpoint |
 | `host.log` | pi stderr; the caller may also redirect P stdout/stderr here for one diagnostic log |
 
 There is no random instance token, per-instance directory, separate pidfile,
 launch-intent marker or persisted copy of the input environment. `host.json` is
 first published by the actual P after it binds; it remains after socket cleanup.
-A crash before pi identity/exit publication leaves incomplete facts, not proof
-that the child is absent. A stale record is never a current liveness oracle.
+Pi's PID is held in P's subprocess handle, not in persistent lifecycle records.
+A stale P record is never a current liveness oracle.
+
+Pi cannot continue independently after P. On Linux, `child_exec.py` arms
+PR_SET_PDEATHSIG(SIGKILL) in a fresh interpreter and then execs pi without an
+extra resident process. Parent checks before and after arming close the startup
+race. Other supported hosts use native pi RPC's shutdown on stdin EOF; P is
+the sole writer. Linux's kernel guard also covers pi ignoring EOF/TERM and
+uncatchable P death. It applies only to the ordinary Host, leaving the agent
+adapter's launch policy under its own control. Tool descendants are separately
+checked for closure before restart, history mutation or deletion.
 
 The host exits with pi's exit code (signals map to 128+signal). P crashing cannot
 manufacture pi's wait/returncode. Stdout `host_started`/`child_wait` lines remain
@@ -97,6 +106,7 @@ task wait detection. `host_io.py` implements only small atomic local records.
 python3 -B test_standalone.py
 python3 -B test_local_process.py
 python3 -B test_generic.py  # Linux-only pidfd/orphan scenarios
+python3 -B test_parent_exit.py  # Linux parent TERM/KILL and pre-exec race
 ```
 
 The standalone suite copies only P, poisons agent discovery and rejects attempted
