@@ -48,16 +48,14 @@ class Host(Transport):
         self.sock_path = config.socket_path
         self.state_file = str(Path(self.sock_path).with_name('host.json'))
         self.stderr_log = str(Path(self.sock_path).with_name('host.log'))
-        self.binding = dict(session=os.path.realpath(self.session_file),
-                            name=self.session_name, cwd=os.path.realpath(config.cwd))
         self.init_transport()
 
     def read_socket_owner(self):
         previous = host_io.read_owner(self.state_file)
         if previous is None:
             return None
-        if not isinstance(previous, dict) or previous.get('binding') != self.binding:
-            raise RuntimeError('host state binding mismatch')
+        if not isinstance(previous, dict) or not isinstance(previous.get('host'), dict):
+            raise RuntimeError('missing host identity')
         owner = previous['host']
         return dict(pid=owner['pid'], procStart=owner['start'])
 
