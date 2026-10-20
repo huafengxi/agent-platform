@@ -2,30 +2,31 @@
 
 P is a Python-standard-library-only process/transport mechanism. Copy this
 whole directory anywhere and run it without agentd, a workspace, persona assets,
-`AGENTD_DIR` or `PYTHONPATH`. The platform repository is only its distribution
-container; there is no runtime dependency on another module.
+`AGENTD_DIR` or `PYTHONPATH`. The platform repository is its distribution
+container, not a runtime dependency on another module.
 
 ## Responsibility
 
-P starts one `pi --mode rpc`, owns its stdin/stdout/stderr PIPEs, drains output
-without an observer, serves one replaceable Unix-socket client, replays a bounded
-raw event ring plus live native UI requests, and reports the actual child wait
-result. It never restarts pi, replays inbound commands, prompts a model on its
-own, interprets task reports or participates in scheduling/registration/mailboxes.
+P starts one `pi --mode rpc`, uniquely owns its stdin/stdout/stderr PIPEs, drains
+output without an observer, serves one replaceable Unix-socket client, replays
+a bounded raw event ring plus live native UI requests, and waits for its child.
+It never restarts pi, replays inbound commands, prompts a model on its own,
+interprets task reports or participates in scheduling/registration/mailboxes.
 
-The caller explicitly supplies paths, cwd, executable, `-e` pairs and the child
-environment. P does not discover the caller's machine/workspace configuration or
-scrub agent identity policy. The inherited real `RUND_LEASE_FD`, if supplied by a
-runtime, is propagated as an actual fd, not synthesized. All host I/O and local
-Linux/Darwin process identities are implemented inside this directory.
+The caller supplies cwd, executable, history/socket paths, explicit `-e` pairs
+and child environment. P does not discover workspace configuration or scrub
+agent identity policy. A runtime's actual inherited `RUND_LEASE_FD` is propagated
+as an open fd, not synthesized from configuration.
 
-## Launch
+## Launch input
 
 ```sh
-python3 pi_host.py /absolute/private/declaration.json
+python3 pi_host.py - < /caller/supplied-input.json
 ```
 
-The declaration has exactly these keys:
+`-` reads one JSON object through stdin until EOF. A caller can instead pass an
+explicit input filename. The Web caller uses a one-shot pipe and does not keep
+a launch configuration/environment file. Input has exactly these keys:
 
 ```json
 {
@@ -39,44 +40,56 @@ The declaration has exactly these keys:
 }
 ```
 
-The directory and all configuration are caller-owned. Keep the socket path short
-for platform AF_UNIX limits. Each explicit invocation starts one child; no
-transparent recovery loop exists. `host_started` identifies P and pi only after
-pi has been spawned; `child_wait` carries the real return code. The host exits
-with pi's exit code (a signal maps to 128+signal). P crashing cannot manufacture
-pi's wait/returncode. Stderr is drained/flushed promptly and a bounded tail stays
-in memory. A slow observer is dropped after a bounded send timeout rather than
-blocking pi indefinitely.
+## Runtime output
 
-## Socket and acceptance
+Use one agreed endpoint per session in a short, caller-owned private directory.
+The ordinary host creates only these runtime outputs beside that endpoint:
 
-P creates no cross-process file locks. Use one agreed endpoint per session.
-Existing live-owner/unknown-endpoint checks and bind errors are conservative,
-not a lease, a winner election or simultaneous-start uniqueness guarantee.
-Metadata writes use unique temporary files and atomic replacement. Cleanup only
-unlinks the inode P actually bound; it does not delete a new owner's endpoint.
+| Output | Writer and meaning |
+|---|---|
+| `host.json` | P alone: canonical session/name/cwd binding, actual P identity, actual pi identity when available, and `childWait` only after real `wait()` |
+| socket (normally `s`) | P's Unix stream endpoint |
+| `host.log` | pi stderr; the caller may also redirect P stdout/stderr here for one diagnostic log |
 
-After launching P, the W caller connects to the fixed endpoint, checks kernel
-peer PID/uid plus start identity against THIS invocation's Popen, and sends a
-unique-id `get_state`. Only its matching successful response accepts startup.
-No request is sent to a mismatched peer. This belongs to the launching caller,
-not a pre-start arbitration protocol inside P. macOS signals use accepted
-check-identity-then-kill semantics, not atomic process handles; see
-[LOCAL-PROCESS.md](LOCAL-PROCESS.md).
+There is no random instance token, per-instance directory, separate pidfile,
+launch-intent marker or persisted copy of the input environment. `host.json` is
+first published by the actual P after it binds; it remains after socket cleanup.
+A crash before pi identity/exit publication leaves incomplete facts, not proof
+that the child is absent. A stale record is never a current liveness oracle.
 
-## Boundary and migration
+The host exits with pi's exit code (signals map to 128+signal). P crashing cannot
+manufacture pi's wait/returncode. Stdout `host_started`/`child_wait` lines remain
+optional standalone diagnostics; ordinary Web readers do not parse logs to make
+lifecycle decisions. Stderr is drained/flushed promptly, with a bounded in-memory
+tail. Slow observers are dropped after a bounded send timeout, not allowed to
+block pi indefinitely.
 
-Agent task/resident policy is now [agentd's adapter](../agentd/RPC-ADAPTER.md).
-It imports this generic `Transport` and adds agent-only file locks, identity
-hooks, prompt delivery, receiver handshake, persona injection, convergence and
-report/error gates. Those files/tests/assets do not remain in P. The dependency
-is **agentd → P**, never the reverse; old P paths are removed, not forwarding
-shims.
+## Ownership and acceptance
 
-`rpc_dialogs.py` is the native pi RPC in-memory UI baseline. It was moved from
-A with its sole implementation; A now consumes P. This is not persistent task
-wait detection. `host_io.py` independently implements only the tiny local owner
-record operations needed by P; it is not a copy of agentd/proto.py.
+P has no cross-process file lock, lease or simultaneous-start uniqueness promise.
+Live-owner/unknown-endpoint checks and bind errors conservatively reject unsafe
+reuse. Existing owner checks use the native P identity in `host.json`; metadata
+uses unique temporary files and atomic replacement. P cleans up only the socket
+inode it bound, never an endpoint installed by another owner.
+
+After launch, the W caller checks kernel peer PID/uid and process start identity
+against THIS invocation's Popen, then sends one uniquely identified `get_state`.
+Only the matching successful response accepts startup. No RPC is sent to a
+mismatched peer. Web does not persist an intent before Popen: an interrupted
+launch may need manual investigation. This does not promise automatic crash
+recovery or atomic contention handling. Darwin signals use accepted
+check-identity-then-kill semantics; see [LOCAL-PROCESS.md](LOCAL-PROCESS.md).
+
+## Agent adapter boundary
+
+[agentd's adapter](../agentd/RPC-ADAPTER.md) imports generic `Transport` and adds
+its own file locks, identity hooks, delivery/persona and completion policies.
+The dependency is **agentd → P**, never the reverse. Its existing pidfile/log
+protocol is preserved by Transport's default owner hooks; the minimal ordinary
+Host overrides those hooks without changing the agent protocol.
+
+`rpc_dialogs.py` is the sole native pi RPC in-memory UI baseline, not persistent
+task wait detection. `host_io.py` implements only small atomic local records.
 
 ## Tests
 
@@ -86,10 +99,8 @@ python3 -B test_local_process.py
 python3 -B test_generic.py  # Linux-only pidfd/orphan scenarios
 ```
 
-The standalone suite copies only P into a fresh unrelated directory, poisons
-agent discovery, forbids A module imports/reads, and proves a real socket peer,
-matching `get_state`, real exit 7 and zero file locks. Native process facts cover
-Linux and Darwin (with an explicit Linux-only oracle skip on Mac). Mutable test
-roots are isolated and retained. Agent lifecycle/persona tests live in agentd.
-These are candidate tests, not production, browser/model/receiver acceptance or
-permission to reopen separately suspended experiments.
+The standalone suite copies only P, poisons agent discovery and rejects attempted
+A imports/reads. It exercises stdin configuration, real peer/get_state, actual
+exit 7 and minimal runtime files. Process tests cover native Linux/Darwin facts
+(with explicit platform skips). Agent policy tests remain in agentd. Tests use
+isolated mutable roots, not production services or user/model acceptance.

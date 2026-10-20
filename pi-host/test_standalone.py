@@ -53,7 +53,6 @@ for line in sys.stdin:
                    PYTHONDONTWRITEBYTECODE='1')
         cfg = dict(sessionFile=str(root / 'history.jsonl'), cwd=str(root), sessionName='standalone',
                    piBinary=str(fake), socketPath=str(root / 's'), extensionArgv=[], env=env)
-        declaration = root / 'config.json'; declaration.write_text(json.dumps(cfg))
         # Reject even an attempted read/import of A, instead of merely checking
         # that a convenient installed checkout was not needed in this test.
         launcher = '''import os,sys,runpy
@@ -68,8 +67,9 @@ runpy.run_path(entry,run_name='__main__')
 '''
         out = (root / 'facts.jsonl').open('w'); err = (root / 'stderr').open('w')
         p = subprocess.Popen([sys.executable, '-I', '-B', '-c', launcher, str(poison),
-                              str(code / 'pi_host.py'), str(declaration)],
-                             env=env, cwd=home, stdout=out, stderr=err)
+                              str(code / 'pi_host.py'), '-'],
+                             env=env, cwd=home, stdin=subprocess.PIPE, stdout=out, stderr=err)
+        p.stdin.write(json.dumps(cfg).encode()); p.stdin.close()
         facts = []; peer = None; conn = socket.socket(socket.AF_UNIX); conn.settimeout(5)
         try:
             end = time.monotonic() + 8
@@ -96,6 +96,13 @@ runpy.run_path(entry,run_name='__main__')
             self.assertEqual(facts[-1]['event'], 'child_wait')
             self.assertEqual(facts[-1]['returncode'], 7)
             self.assertEqual(list(root.rglob('*.lock')), [])
+            state = json.loads((root / 'host.json').read_text())
+            self.assertEqual(state['host']['pid'], p.pid)
+            self.assertEqual(state['childWait'], {'returncode': 7})
+            self.assertNotIn('instance', state)
+            for name in ('s.pid', 's.stderr.log', 'config.json', 'current.json', 'binding.json'):
+                self.assertFalse((root / name).exists(), name)
+            self.assertFalse((root / 's').exists())
         finally:
             conn.close()
             if p.poll() is None: p.terminate(); p.wait(timeout=8)

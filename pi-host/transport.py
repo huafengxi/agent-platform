@@ -88,7 +88,7 @@ class Transport:
         d = os.path.dirname(self.sock_path)
         os.makedirs(d, mode=0o700, exist_ok=True)
         try:
-            doc = host_io.read_owner(self.pid_file)
+            doc = self.read_socket_owner()
             if isinstance(doc, dict) and doc.get('pid'):
                 if self.process_owner_alive(doc['pid'], doc.get('procStart')):
                     raise RuntimeError('live host owns socket; refusing second host')
@@ -104,7 +104,7 @@ class Transport:
             self._socket_identity = (st.st_dev, st.st_ino)
             os.chmod(self.sock_path, 0o600)
             self.srv.listen(4)
-            host_io.write_owner(self.pid_file, {
+            self.publish_socket_owner({
                 'pid': os.getpid(), 'procStart': self.process_starttime(os.getpid()),
                 'startedAt': host_io.now_ts(), **self.socket_metadata()})
             atexit.register(self.cleanup_socket)
@@ -112,6 +112,18 @@ class Transport:
             Transport.cleanup_socket(self)
             raise
         log('socket ready: %s', self.sock_path)
+
+    def read_socket_owner(self):
+        return host_io.read_owner(self.pid_file)
+
+    def publish_socket_owner(self, owner):
+        host_io.write_owner(self.pid_file, owner)
+
+    def remove_socket_owner(self):
+        try:
+            os.unlink(self.pid_file)
+        except FileNotFoundError:
+            pass
 
     def socket_metadata(self):
         return dict(sessionFile=os.path.realpath(self.session_file), sessionName=self.session_name)
@@ -128,10 +140,7 @@ class Transport:
     def cleanup_socket(self):
         if self.owns_socket():
             os.unlink(self.sock_path)
-            try:
-                os.unlink(self.pid_file)
-            except FileNotFoundError:
-                pass
+            self.remove_socket_owner()
         self._socket_identity = None
         if self.srv is not None:
             self.srv.close()
