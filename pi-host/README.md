@@ -47,7 +47,7 @@ Runtime files beside that endpoint have explicit writers:
 
 | Output | Writer and meaning |
 |---|---|
-| `host.json` | Web caller alone: only the accepted native P identity under `host`; P reads it for previous-owner checks |
+| `host.json` | Web caller alone: accepted native P identity fields at the top level, without a `host` wrapper; P reads it for previous-owner checks |
 | socket (normally `s`) | P's Unix stream endpoint |
 | `host.log` | pi stderr; the caller may also redirect P stdout/stderr here for one diagnostic log |
 

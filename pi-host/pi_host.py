@@ -54,10 +54,9 @@ class Host(Transport):
         previous = host_io.read_owner(self.state_file)
         if previous is None:
             return None
-        if not isinstance(previous, dict) or not isinstance(previous.get('host'), dict):
+        if not isinstance(previous, dict) or not {'pid', 'start'} <= previous.keys():
             raise RuntimeError('missing host identity')
-        owner = previous['host']
-        return dict(pid=owner['pid'], procStart=owner['start'])
+        return dict(pid=previous['pid'], procStart=previous['start'])
 
     def publish_socket_owner(self, owner):
         # Web publishes its verified P identity after real peer/get_state.

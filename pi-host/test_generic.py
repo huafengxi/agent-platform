@@ -119,7 +119,7 @@ class Case(unittest.TestCase):
         # Standalone caller publishes accepted owner facts; P never writes JSON.
         import local_process
         parent = local_process.identity(doc['pid'])['ppid']
-        owner = dict(host=local_process.identity(parent))
+        owner = local_process.identity(parent)
         (self.area/'local/host.json').write_text(json.dumps(owner))
         return doc
 
