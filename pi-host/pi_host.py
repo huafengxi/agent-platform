@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Independent ordinary pi host. Launch with JSON on stdin (argument '-').
 
-A caller may also supply an explicit JSON input file. Only host.json, the socket
-and optional diagnostics are runtime output; there is no launch-intent marker.
+A caller may also supply an explicit JSON input file. Runtime output consists
+of the socket and optional diagnostics; host.json belongs to the Web caller.
 """
 import json
 import os
@@ -50,7 +50,6 @@ class Host(Transport):
         self.stderr_log = str(Path(self.sock_path).with_name('host.log'))
         self.binding = dict(session=os.path.realpath(self.session_file),
                             name=self.session_name, cwd=os.path.realpath(config.cwd))
-        self.record = None
         self.init_transport()
 
     def read_socket_owner(self):
@@ -63,9 +62,8 @@ class Host(Transport):
         return dict(pid=owner['pid'], procStart=owner['start'])
 
     def publish_socket_owner(self, owner):
-        # Called only AFTER bind, by this actual P. No caller launch prediction.
-        self.record = dict(binding=self.binding, host=local_process.identity(os.getpid()))
-        self.publish()
+        # Web publishes its verified P identity after real peer/get_state.
+        pass
 
     def launch_argv(self, config):
         if sys.platform.startswith('linux'):
@@ -75,11 +73,8 @@ class Host(Transport):
         return config.argv()
 
     def remove_socket_owner(self):
-        # Keep actual identities/wait available after endpoint cleanup.
+        # Web owns host.json, including retirement of old identities.
         pass
-
-    def publish(self):
-        host_io.write_owner(self.state_file, self.record)
 
     def run(self):
         self.setup_socket()
@@ -89,19 +84,13 @@ class Host(Transport):
             if child is None:
                 raise RuntimeError('child start identity unavailable')
             threading.Thread(target=self.accept_loop, daemon=True, name='host-accept').start()
-            fact('host_started', hostPid=os.getpid(), hostProcStart=self.record['host']['start'],
+            fact('host_started', hostPid=os.getpid(), hostProcStart=local_process.starttime(os.getpid()),
                  childPid=self.pi.pid, childProcStart=child['start'],
                  sessionFile=self.session_file, sessionName=self.session_name, socketPath=self.sock_path)
             rc = self.pi.wait()  # sole pi wait, no restart or report predicate
-            self.record['childWait'] = dict(returncode=rc)
-            self.publish()
             self.finish_pumps()
             fact('child_wait', childPid=self.pi.pid, returncode=rc)
             return rc if rc >= 0 else 128 - rc
-        except Exception as e:
-            self.record['error'] = repr(e)
-            self.publish()
-            raise
         finally:
             self.cleanup_socket()
 

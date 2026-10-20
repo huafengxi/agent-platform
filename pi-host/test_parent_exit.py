@@ -55,8 +55,7 @@ while True: time.sleep(1)
                         until(lambda: (root/'child-ready').exists())
                         child = L.identity(int((root/'child-ready').read_text()))
                         self.assertEqual(child['ppid'], p.pid)
-                        state = json.loads((root/'host.json').read_text())
-                        self.assertEqual(set(state), {'binding', 'host'})
+                        self.assertFalse((root/'host.json').exists())
                         # A different process in another session must be untouched.
                         with subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(60)'],
                                               start_new_session=True) as unrelated:
@@ -65,7 +64,7 @@ while True: time.sleep(1)
                                 until(lambda: not L.identity(child['pid']) or L.identity(child['pid'])['state'] == 'Z')
                                 self.assertEqual(os.waitpid(child['pid'], 0)[1], signal.SIGKILL)
                                 self.assertIsNone(unrelated.poll())
-                                self.assertNotIn('childWait', json.loads((root/'host.json').read_text()))
+                                self.assertFalse((root/'host.json').exists())
                             finally:
                                 unrelated.kill(); unrelated.wait(timeout=5)
                     finally:

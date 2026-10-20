@@ -43,17 +43,18 @@ a launch configuration/environment file. Input has exactly these keys:
 ## Runtime output
 
 Use one agreed endpoint per session in a short, caller-owned private directory.
-The ordinary host creates only these runtime outputs beside that endpoint:
+Runtime files beside that endpoint have explicit writers:
 
 | Output | Writer and meaning |
 |---|---|
-| `host.json` | P alone: canonical session/name/cwd binding, actual P identity, and `childWait` only after real `wait()` |
+| `host.json` | Web caller alone: canonical session/name/cwd binding and accepted native P identity; P reads it for previous-owner checks |
 | socket (normally `s`) | P's Unix stream endpoint |
 | `host.log` | pi stderr; the caller may also redirect P stdout/stderr here for one diagnostic log |
 
 There is no random instance token, per-instance directory, separate pidfile,
 launch-intent marker or persisted copy of the input environment. `host.json` is
-first published by the actual P after it binds; it remains after socket cleanup.
+published by Web only after verifying the real socket peer and get_state; it
+remains after socket cleanup. P never writes or removes it.
 Pi's PID is held in P's subprocess handle, not in persistent lifecycle records.
 A stale P record is never a current liveness oracle.
 
@@ -66,8 +67,9 @@ uncatchable P death. It applies only to the ordinary Host, leaving the agent
 adapter's launch policy under its own control. Tool descendants are separately
 checked for closure before restart, history mutation or deletion.
 
-The host exits with pi's exit code (signals map to 128+signal). P crashing cannot
-manufacture pi's wait/returncode. Stdout `host_started`/`child_wait` lines remain
+The host waits for pi in memory and exits with its code (signals map to
+128+signal). Host JSON has no child exit result or error field. Stdout
+`host_started`/`child_wait` lines remain
 optional standalone diagnostics; ordinary Web readers do not parse logs to make
 lifecycle decisions. Stderr is drained/flushed promptly, with a bounded in-memory
 tail. Slow observers are dropped after a bounded send timeout, not allowed to
@@ -77,8 +79,8 @@ block pi indefinitely.
 
 P has no cross-process file lock, lease or simultaneous-start uniqueness promise.
 Live-owner/unknown-endpoint checks and bind errors conservatively reject unsafe
-reuse. Existing owner checks use the native P identity in `host.json`; metadata
-uses unique temporary files and atomic replacement. P cleans up only the socket
+reuse. Existing owner checks read the Web-accepted P identity in `host.json`.
+Web uses unique temporary files and atomic replacement. P cleans up only the socket
 inode it bound, never an endpoint installed by another owner.
 
 After launch, the W caller checks kernel peer PID/uid and process start identity

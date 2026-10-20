@@ -116,6 +116,13 @@ class Case(unittest.TestCase):
             return doc if doc['pid'] not in {d['pid'] for d in self.known} else None
         doc = until(fresh)
         self.known.append(doc)
+        # Standalone caller publishes accepted owner facts; P never writes JSON.
+        import local_process
+        cfg = self.config
+        parent = local_process.identity(doc['pid'])['ppid']
+        owner = dict(binding=dict(session=cfg['sessionFile'], name=cfg['sessionName'], cwd=cfg['cwd']),
+                     host=local_process.identity(parent))
+        (self.area/'local/host.json').write_text(json.dumps(owner))
         return doc
 
     def connect(self):
